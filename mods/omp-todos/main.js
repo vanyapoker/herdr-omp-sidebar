@@ -176,7 +176,8 @@ export default class OmpTodos extends View {
     const turn = mine ? this.turn : null;
     const now = Date.now();
     const running = actions.find(a => a.state === "running");
-    const recent = actions.filter(a => a !== running).slice(0, 5);
+    const finished = actions.filter(a => a !== running);
+    const recent = this.showAllActions ? finished : finished.slice(0, 5);
     const lastEnd = actions.reduce((latest, a) => Math.max(latest, a.ended ?? 0), 0);
     const busy = status === "working" || status === "blocked";
     const elapsed = turn?.started ? duration((busy ? now : lastEnd || now) - turn.started) : null;
@@ -224,7 +225,9 @@ export default class OmpTodos extends View {
             .child(div().w(10).flex_none().text_size(11).text_color(failed ? t.blocked : t.done).child(failed ? "✗" : "✓"))
             .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(item.label))
             .child(div().flex_none().text_size(11).text_color(t.dim).child(took));
-        }))))
+        })))
+        .when(finished.length > 5, c => c.child(toggle("omp-toggle-actions", this.showAllActions ? "Show fewer" : `${finished.length - 5} more`, Boolean(this.showAllActions),
+          (_e, cx) => { this.showAllActions = !this.showAllActions; cx.notify(); }))))
       .when(Boolean(counts), c => c.child(div().text_size(11).text_color(t.dim).child(`${turn.tools} tool calls · ${counts}`)));
 
     const hideDone = !this.showDone && doneCount > 0 && doneCount < tasks.length;

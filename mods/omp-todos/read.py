@@ -5,7 +5,7 @@ import re
 import sys
 from datetime import datetime
 
-MAX_ACTIONS = 8
+MAX_ACTIONS = 100
 
 
 def parse_ms(text):
