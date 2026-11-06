@@ -1,6 +1,6 @@
-import { View, div } from "gpui-kit";
+import { View, div, image } from "gpui-kit";
 import { h_flex, v_flex, Editor, EditorState } from "gpui-base";
-import { props, readTextFile, theme, closeOverlay, settings } from "herdr";
+import { props, readTextFile, theme, closeOverlay, settings, exec, appHome } from "herdr";
 
 // A diff line is " 12|context", "+13|added" or "-12|removed"; anything else is a file heading.
 const DIFF_LINE = /^[+\- ]\s*\d+\|/;
@@ -15,6 +15,17 @@ export default class OmpDetail extends View {
     cx.spawn(async cx => {
       try {
         const inline = props()?.text;
+        // The host loads images only from the app folder, so a picture is copied there for the preview.
+        if (typeof inline !== "string" && !props()?.machine && /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(this.path ?? "")) {
+          const ext = this.path.split(".").pop().toLowerCase();
+          this.copy = `data/omp-preview/${Date.now()}.${ext}`;
+          await exec("mkdir", ["-p", `${appHome()}/data/omp-preview`]);
+          const done = await exec("cp", [this.path, `${appHome()}/${this.copy}`]);
+          if (done.code !== 0) this.error = done.stderr || "Cannot load the picture.";
+          else this.picture = this.copy;
+          cx.notify();
+          return;
+        }
         const text = typeof inline === "string" ? inline : await readTextFile(this.path, { on: props()?.machine ?? null });
         if (text === null) this.error = "File is no longer available.";
         else if (text.includes("\0")) this.error = "Binary file cannot be previewed.";
@@ -24,7 +35,7 @@ export default class OmpDetail extends View {
           this.language = typeof inline === "string" ? "txt" : this.path.split(".").pop() || "txt";
           this.build(this.wrap);
         }
-      } catch (e) { this.error = String(e); }
+      } catch (e) { this.error = /valid UTF-8/.test(String(e)) ? "Binary file cannot be previewed." : String(e); }
       cx.notify();
     });
   }
@@ -42,7 +53,10 @@ export default class OmpDetail extends View {
     cx.notify();
   }
 
-  close() { this.editor?.release(); }
+  close() {
+    this.editor?.release();
+    if (this.copy) exec("rm", ["-f", `${appHome()}/${this.copy}`]);
+  }
 
   // Diffs are drawn as coloured lines: the editor has no diff highlighting.
   diffView(t) {
@@ -68,6 +82,8 @@ export default class OmpDetail extends View {
           .tooltip(this.wrap ? "Word wrap on: click to scroll sideways instead" : "Word wrap off: click to wrap long lines")
           .on_click((_e, cx) => this.toggleWrap(cx)).child("Wrap"))
         .child(div().id("detail-close").px(6).text_color(t.muted).on_click(() => closeOverlay(props().overlay)).child("×")))
-      .child(this.diff ? this.diffView(t) : this.editor ? Editor.new(this.editor).flex_1().min_h(0) : div().p(14).text_color(t.dim).child(this.error || "Loading…"));
+      .child(this.picture ? div().id("detail-image").flex_1().min_h(0).p(12).overflow_y_scrollbar()
+          .child(image(this.picture).w_full())
+        : this.diff ? this.diffView(t) : this.editor ? Editor.new(this.editor).flex_1().min_h(0) : div().p(14).text_color(t.dim).child(this.error || "Loading…"));
   }
 }
