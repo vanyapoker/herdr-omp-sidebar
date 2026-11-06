@@ -5,6 +5,7 @@ A panel next to the focused **omp** terminal in the Herdr app.
 | | |
 |---|---|
 | **Activity** | what omp is doing now, elapsed time, this turn's tool calls (repeats fold into `read ×6`; click one for its command and output, or an edit for its diff, hover for the full text; task calls show their subagents and what each is doing) |
+| **Full diff** | a button on the Activity card opens every file omp changed (this turn or the whole session) as one diff, one collapsible card per file with line numbers and +/− counts |
 | **Tasks** | omp's todo list with progress, completed ones collapsible |
 | **Subagents** | running and finished workers, with a viewer for their reports |
 | **Status** | the provider's 5-hour and 7-day limits (left, reset time, from `omp usage`), context use (amber at 60%, red at 80%, with a **Compact** button), git branch, folder |
@@ -30,7 +31,7 @@ The installer is idempotent and backs up everything it replaces as `*.bak`. It a
 ### Update / uninstall
 
 - Update: `git pull && ./install.sh`
-- Uninstall: delete `mods/omp-todos`, `mods/omp-models`, `mods/omp-detail` in your Herdr folder, remove the `omp-todos` block from your layout and the `ctrl-shift-u` key, and restore `mods/tabs-address.bak` if you used the toolbar button.
+- Uninstall: delete `mods/omp-todos`, `mods/omp-models`, `mods/omp-detail`, `mods/omp-changes` in your Herdr folder, remove the `omp-todos` block from your layout and the `ctrl-shift-u` key, and restore `mods/tabs-address.bak` if you used the toolbar button.
 
 ## Limits
 

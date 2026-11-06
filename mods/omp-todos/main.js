@@ -106,7 +106,7 @@ export default class OmpTodos extends View {
         this.workers = data.workers ?? [];
         this.status = info.status?.state ?? null;
         this.model = data.model ?? null;
-        this.stats = { tokens: data.tokens, window: data.window, branch: data.branch, cwd: data.cwd, limits: data.limits };
+        this.stats = { tokens: data.tokens, window: data.window, branch: data.branch, cwd: data.cwd, limits: data.limits, edits: data.edits };
         this.title = data.title ?? null;
         this.effort = live ?? data.effort ?? null;
         this.error = data.error ?? null;
@@ -290,7 +290,14 @@ export default class OmpTodos extends View {
         .children(shownEntries.map(entry => entry.items.length > 1 ? groupRow(entry) : actionRow(entry.items[0])))
         .when(entries.length > 5, c => c.child(toggle("omp-toggle-actions", this.showAllActions ? "Show fewer" : `${entries.length - 5} more`, Boolean(this.showAllActions),
           (_e, cx) => { this.showAllActions = !this.showAllActions; cx.notify(); })))))
-      .when(Boolean(counts), c => c.child(div().text_size(11).text_color(t.dim).child(`${turn.tools} tool calls · ${counts}`)));
+      .when(Boolean(counts) || (this.stats?.edits ?? 0) > 0, c => c.child(h_flex().gap(8).items_center()
+        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(counts ? `${turn.tools} tool calls · ${counts}` : ""))
+        .when((this.stats?.edits ?? 0) > 0, r => r.child(h_flex().id("omp-full-diff").flex_none().gap(5).items_center().px(7).py(2).rounded(5).border(1).border_color(t.border)
+          .text_size(11).text_color(t.muted).cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("Every file omp changed, as one diff")
+          .on_click(() => openOverlay({ mod: "omp-changes", kind: "dialog", width: 940, height: 720, props: { address, scope: (turn?.counts?.edit || turn?.counts?.write) ? "turn" : "session" } }))
+          .child(svg("mods/omp-todos/icons/edit.svg").size(11).flex_none())
+          .child("Full diff")))));
 
     // Finished work folds away, including a list that is entirely done, so an old plan doesn't linger.
     const hideDone = !this.showDone && doneCount > 0;

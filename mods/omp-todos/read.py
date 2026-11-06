@@ -208,9 +208,52 @@ def session_title(path):
     return title or None
 
 
-def session_data(path, cwd, pid):
+def changed_files(msg, call, cwd, turn_no):
+    """The files one successful edit/write call changed, each with its diff (omp's `+12|text` line format)."""
+    details = msg.get('details') if isinstance(msg.get('details'), dict) else {}
+    if msg.get('toolName') == 'edit':
+        files = details.get('perFileResults')
+        if not (isinstance(files, list) and files):
+            files = [details]
+        return [{'path': f['path'], 'diff': f['diff'], 'turn': turn_no} for f in files if isinstance(f, dict) and f.get('path') and f.get('diff')]
+    args = (call or {}).get('arguments') or {}
+    content, target = args.get('content'), details.get('resolvedPath') or args.get('path')
+    if not isinstance(content, str) or not isinstance(target, str):
+        return []
+    target = os.path.abspath(os.path.join(cwd, os.path.expanduser(target)))
+    lines = content.split('\n')
+    if lines and lines[-1] == '':
+        lines.pop()
+    return [{'path': target, 'diff': '\n'.join(f'+{i}|{line}' for i, line in enumerate(lines, 1)), 'turn': turn_no, 'written': True}]
+
+
+def build_changes(changes, only_turn, max_lines=1500):
+    """Changes grouped by file, in the order files were first touched; a file's edits are joined by blank lines (hunk gaps)."""
+    files = {}
+    for change in changes:
+        if only_turn is not None and change['turn'] != only_turn:
+            continue
+        entry = files.setdefault(change['path'], {'path': change['path'], 'diffs': [], 'written': False})
+        entry['diffs'].append(change['diff'])
+        entry['written'] = entry['written'] or bool(change.get('written'))
+    result = []
+    for entry in files.values():
+        lines = '\n\n'.join(entry['diffs']).split('\n')
+        result.append({
+            'path': entry['path'],
+            'written': entry['written'],
+            'added': sum(1 for line in lines if re.match(r'\+\s*\d+\|', line)),
+            'removed': sum(1 for line in lines if re.match(r'-\s*\d+\|', line)),
+            'truncated': len(lines) > max_lines,
+            'diff': '\n'.join(lines[:max_lines]),
+        })
+    return {'files': result, 'turn': only_turn is not None}
+
+
+def session_data(path, cwd, pid, scope=None):
     phases, calls, workers, model, effort = [], {}, {}, None, None
     tokens = None
+    turn_no, edits, changes = 0, 0, []
     turn = {'started': None, 'actions': [], 'order': []}
     session_dir = os.path.splitext(path)[0]
     with open(path, 'rb') as f:
@@ -226,6 +269,7 @@ def session_data(path, cwd, pid):
                 msg = record.get('message') or {}
                 if msg.get('role') == 'user':
                     turn = {'started': msg.get('timestamp'), 'actions': {}, 'order': []}
+                    turn_no += 1
                 if msg.get('role') == 'assistant':
                     # A session that never switched models has no model_change record; its replies name the model.
                     if msg.get('provider') and msg.get('model'):
@@ -270,6 +314,10 @@ def session_data(path, cwd, pid):
                     action['output'] = result_text(msg)
                     if msg.get('toolName') == 'edit':
                         action['diff'] = diff_text(msg.get('details'))
+                if not msg.get('isError') and msg.get('toolName') in ('edit', 'write'):
+                    edits += 1
+                    if scope:
+                        changes.extend(changed_files(msg, calls.get(msg.get('toolCallId')), cwd, turn_no))
                 details = msg.get('details') or {}
                 if msg.get('isError'):
                     continue
@@ -297,6 +345,8 @@ def session_data(path, cwd, pid):
                     worker['status'] = 'completed'
     actions = turn['actions'] if isinstance(turn['actions'], dict) else {}
     ordered = [actions[i] for i in turn['order'] if i in actions]
+    if scope:
+        return build_changes(changes, turn_no if scope == 'turn' else None)
     counts = {}
     for action in ordered:
         counts[action['tool']] = counts.get(action['tool'], 0) + 1
@@ -330,6 +380,7 @@ def session_data(path, cwd, pid):
         'branch': git_branch(cwd),
         'title': session_title(path),
         'cwd': cwd,
+        'edits': edits,
     }
 
 
@@ -362,7 +413,9 @@ def main():
     cwd = process_cwd(pid)
     for path in open_files(pid):
         if '/sessions/' in path and path.endswith('.jsonl') and os.path.isfile(path):
-            print(json.dumps(session_data(path, cwd, pid)))
+            # `read.py <pid> --changes turn|session` lists the files omp changed instead of the usual summary.
+            scope = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == '--changes' else None
+            print(json.dumps(session_data(path, cwd, pid, scope)))
             return
     print(json.dumps({'error': 'OMP session is not available'}))
 

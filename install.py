@@ -67,7 +67,7 @@ def main():
     a = p.parse_args()
     home = a.home
 
-    for name in ("omp-todos", "omp-models", "omp-detail") + (() if a.no_toolbar else ("tabs-address",)):
+    for name in ("omp-todos", "omp-models", "omp-detail", "omp-changes") + (() if a.no_toolbar else ("tabs-address",)):
         copy_mod(name, home)
 
     os.makedirs(os.path.join(home, "custom-icons"), exist_ok=True)
