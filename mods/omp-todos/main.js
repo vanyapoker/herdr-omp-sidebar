@@ -275,16 +275,17 @@ export default class OmpTodos extends View {
           (_e, cx) => { this.showAllActions = !this.showAllActions; cx.notify(); })))))
       .when(Boolean(counts), c => c.child(div().text_size(11).text_color(t.dim).child(`${turn.tools} tool calls · ${counts}`)));
 
-    const hideDone = !this.showDone && doneCount > 0 && doneCount < tasks.length;
+    // Finished work folds away, including a list that is entirely done, so an old plan doesn't linger.
+    const hideDone = !this.showDone && doneCount > 0;
     const multiPhase = phases.length > 1 || (phases[0] && phases[0].name !== "Tasks");
     const taskList = v_flex().gap(10)
       .child(section("Tasks", tasks.length ? `${doneCount}/${tasks.length}` : null))
       .when(tasks.length > 0, c => c.child(h_flex().gap(2).children(tasks.map(x => div().flex_1().h(3).rounded(2)
         .bg(x.status === "completed" ? t.done : x.status === "in_progress" ? t.working : x.status === "blocked" ? t.blocked : t.border)))))
       .when(tasks.length === 0, c => c.child(div().text_color(t.dim).child("No tasks yet. OMP builds a task list for multi-step work.")))
-      .when(doneCount > 0 && doneCount < tasks.length, c => c.child(toggle("omp-toggle-done", `${doneCount} completed`, !hideDone,
+      .when(doneCount > 0, c => c.child(toggle("omp-toggle-done", doneCount === tasks.length ? `All ${doneCount} completed` : `${doneCount} completed`, !hideDone,
         (_e, cx) => { this.showDone = !this.showDone; cx.notify(); })))
-      .children(phases.map(phase => v_flex().gap(4)
+      .children(phases.filter(phase => (phase.tasks ?? []).some(x => !(hideDone && x.status === "completed"))).map(phase => v_flex().gap(4)
         .when(multiPhase, c => c.child(div().px(8).text_size(11).text_color(t.dim).child(phase.name)))
         .children((phase.tasks ?? []).filter(x => !(hideDone && x.status === "completed")).map(task => {
           const active = task.status === "in_progress";
