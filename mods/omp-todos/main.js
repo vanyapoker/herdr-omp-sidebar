@@ -231,13 +231,16 @@ export default class OmpTodos extends View {
     const brief = text => { const s = String(text).replace(/\s+/g, " ").trim(); return s.length > 300 ? `${s.slice(0, 299)}…` : s; };
     const openText = item => openOverlay({ mod: "omp-detail", kind: "dialog", width: 680, height: 560,
       props: { title: `${item.tool} · ${item.label}`, text: `${item.input ?? item.detail ?? item.label}${item.output ? `\n\n── output ──\n${item.output}` : ""}` } });
+    // An edit opens what it changed, not the whole file; the diff is `+added` / `-removed` lines with context.
+    const openDiff = item => openOverlay({ mod: "omp-detail", kind: "dialog", width: 680, height: 560,
+      props: { title: `edit · ${item.label}`, text: item.diff, language: "diff", lineNumbers: false } });
     const actionRow = (item, indent = 0) => {
       const failed = item.state === "error";
       const took = item.started && item.ended && item.ended - item.started >= 1000 ? duration(item.ended - item.started) : "";
       return v_flex()
         .child(h_flex().id(`activity-${item.id}`).gap(7).items_center().pr(4).py(2).pl(4 + indent).rounded(4).cursor_pointer().hover(s => s.bg(t.hover))
-          .tooltip(item.path ? `Open ${item.path}` : brief(item.input || item.detail || item.label))
-          .on_click(() => (item.path ? open(item.path) : openText(item)))
+          .tooltip(item.diff ? `Show the diff${item.path ? ` of ${item.path}` : ""}` : item.path ? `Open ${item.path}` : brief(item.input || item.detail || item.label))
+          .on_click(() => (item.diff ? openDiff(item) : item.path ? open(item.path) : openText(item)))
           .child(div().w(10).flex_none().text_size(11).text_color(failed ? t.blocked : t.done).child(failed ? "✗" : "✓"))
           .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(item.label))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(took)))

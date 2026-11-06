@@ -179,6 +179,20 @@ def git_branch(cwd):
         return None
 
 
+def diff_text(details, limit=8000):
+    """The edit's diff from its tool result; a multi-file edit gets one headed block per file."""
+    if not isinstance(details, dict):
+        return ''
+    files = details.get('perFileResults')
+    if isinstance(files, list) and files:
+        text = '\n\n'.join(f"{f.get('path', '')}\n{f.get('diff', '')}" for f in files if isinstance(f, dict) and f.get('diff'))
+    else:
+        text = details.get('diff') or ''
+        if text and details.get('path'):
+            text = f"{details['path']}\n{text}"
+    return text if len(text) <= limit else text[:limit] + '\n… (truncated)'
+
+
 def session_data(path, cwd, pid):
     phases, calls, workers, model, effort = [], {}, {}, None, None
     tokens = None
@@ -236,6 +250,8 @@ def session_data(path, cwd, pid):
                     action['state'] = 'error' if msg.get('isError') else 'done'
                     action['ended'] = msg.get('timestamp')
                     action['output'] = result_text(msg)
+                    if msg.get('toolName') == 'edit':
+                        action['diff'] = diff_text(msg.get('details'))
                 details = msg.get('details') or {}
                 if msg.get('isError'):
                     continue
@@ -282,6 +298,7 @@ def session_data(path, cwd, pid):
     for action in ordered[:-BODY_ACTIONS]:
         action.pop('input', None)
         action.pop('output', None)
+        action.pop('diff', None)
     return {
         'phases': phases,
         'turn': {'started': turn['started'], 'tools': len(ordered), 'counts': counts},
