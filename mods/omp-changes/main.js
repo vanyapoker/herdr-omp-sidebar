@@ -4,8 +4,23 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { props, hc, exec, appHome, readTextFile, theme, closeOverlay, settings } from "herdr";
+import { languageOf, tokenize, pieces } from "./highlight.js";
 
 const LINE = /^([+\- ])\s*(\d+)\|(.*)$/;
+
+// Adds highlighted pieces to the code rows; block comments and docstrings carry over between the rows of a hunk.
+function colour(rows, lang) {
+  if (!lang) return rows;
+  let state = null;
+  for (const r of rows) {
+    if (r.kind === "gap") { state = null; continue; }
+    if (r.kind === "note") continue;
+    const result = tokenize(lang, r.text, state);
+    r.pieces = pieces(result.tokens);
+    if (r.kind !== "-") state = result.state;
+  }
+  return rows;
+}
 const EXPAND_BUDGET = 700; // rows drawn open at first; later files start collapsed
 let readerSource = null;
 
@@ -55,7 +70,7 @@ export default class OmpChanges extends View {
         const data = JSON.parse(run.stdout);
         if (data.error) throw new Error(data.error);
         if (token !== this.token) return;
-        this.rows = new Map(data.files.map((f) => [f.path, parse(f.diff)]));
+        this.rows = new Map(data.files.map((f) => [f.path, colour(parse(f.diff), languageOf(f.path))]));
         this.collapsed = new Set();
         let drawn = 0;
         data.files.forEach((f, i) => {
@@ -95,18 +110,27 @@ export default class OmpChanges extends View {
     cx.notify();
   }
 
+  palette(t) {
+    return { plain: t.foreground, kw: t.ansi5, str: t.ansi2, com: t.dim, num: t.ansi1, fn: t.ansi4, type: t.ansi3, const: t.ansi6, key: t.ansi4 };
+  }
+
   row(r, t, tint) {
     if (r.kind === "gap") return div().h(22).flex().items_center().pl(70).text_size(11).text_color(t.dim).bg(t.surface).child("⋯");
     if (r.kind === "note") return div().px(12).py(4).text_color(t.dim).child(r.text);
     const sign = r.kind === "+" ? t.ansi2 : r.kind === "-" ? t.ansi1 : t.dim;
+    const colors = this.palette(t);
     return h_flex().items_start().min_w(0)
       .when(r.kind === "+", (el) => el.bg(tint(t.ansi2)))
       .when(r.kind === "-", (el) => el.bg(tint(t.ansi1)))
       .child(div().w(56).flex_none().flex().justify_end().pr(10).text_color(t.dim).child(r.no))
       .child(div().w(14).flex_none().text_color(sign).child(r.kind === " " ? "" : r.kind))
-      .child(div().flex_1().min_w(0).pr(12).text_color(t.foreground)
-        .when(this.wrap, (el) => el.whitespace_normal()).when(!this.wrap, (el) => el.whitespace_nowrap())
-        .child(r.text || " "));
+      .child(r.pieces
+        // Highlighted: one child per word, so a long line wraps between words.
+        ? h_flex().flex_1().min_w(0).pr(12).when(this.wrap, (el) => el.flex_wrap()).when(!this.wrap, (el) => el.flex_nowrap())
+          .children(r.pieces.map((p) => div().flex_none().text_color(colors[p.kind]).child(p.text)))
+        : div().flex_1().min_w(0).pr(12).text_color(t.foreground)
+          .when(this.wrap, (el) => el.whitespace_normal()).when(!this.wrap, (el) => el.whitespace_nowrap())
+          .child(r.text || " "));
   }
 
   fileCard(file, i, t, tint) {

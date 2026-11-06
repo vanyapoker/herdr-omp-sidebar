@@ -292,12 +292,11 @@ export default class OmpTodos extends View {
           (_e, cx) => { this.showAllActions = !this.showAllActions; cx.notify(); })))))
       .when(Boolean(counts) || (this.stats?.edits ?? 0) > 0, c => c.child(h_flex().gap(8).items_center()
         .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(counts ? `${turn.tools} tool calls · ${counts}` : ""))
-        .when((this.stats?.edits ?? 0) > 0, r => r.child(h_flex().id("omp-full-diff").flex_none().gap(5).items_center().px(7).py(2).rounded(5).border(1).border_color(t.border)
-          .text_size(11).text_color(t.muted).cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))
-          .tooltip("Every file omp changed, as one diff")
+        .when((this.stats?.edits ?? 0) > 0, r => r.child(div().id("omp-full-diff").size(22).flex_none().flex().items_center().justify_center().rounded(5)
+          .text_color(t.muted).cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("Show full diff: every file omp changed")
           .on_click(() => openOverlay({ mod: "omp-changes", kind: "dialog", width: 940, height: 720, props: { address, scope: (turn?.counts?.edit || turn?.counts?.write) ? "turn" : "session" } }))
-          .child(svg("mods/omp-todos/icons/edit.svg").size(11).flex_none())
-          .child("Full diff")))));
+          .child(svg("mods/omp-todos/icons/diff.svg").size(14))))));
 
     // Finished work folds away, including a list that is entirely done, so an old plan doesn't linger.
     const hideDone = !this.showDone && doneCount > 0;
