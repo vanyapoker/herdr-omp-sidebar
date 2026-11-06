@@ -56,6 +56,7 @@ export default class OmpTodos extends View {
     this.workers = [];
     this.status = null;
     this.model = null;
+    this.title = null;
     this.effort = null;
     this.switching = false;
     this.switchError = null;
@@ -75,6 +76,7 @@ export default class OmpTodos extends View {
       this.workers = [];
       this.status = null;
       this.model = null;
+      this.title = null;
       this.effort = null;
       this.switchError = null;
       this.error = null;
@@ -105,6 +107,7 @@ export default class OmpTodos extends View {
         this.status = info.status?.state ?? null;
         this.model = data.model ?? null;
         this.stats = { tokens: data.tokens, window: data.window, branch: data.branch, cwd: data.cwd, limits: data.limits };
+        this.title = data.title ?? null;
         this.effort = live ?? data.effort ?? null;
         this.error = data.error ?? null;
       } catch (e) {
@@ -218,12 +221,13 @@ export default class OmpTodos extends View {
       .child(div().flex_1().text_size(11).font_semibold().text_color(t.muted).child(title))
       .when(Boolean(right), el => el.child(div().text_size(11).text_color(t.dim).child(right)));
 
-    const header = h_flex().h(46).px(14).items_center().gap(10).flex_none().border_b(1).border_color(t.border)
-      .child(div().font_semibold().text_color(t.foreground).child("OMP"))
-      .when(Boolean(label), el => el.child(h_flex().gap(6).items_center().px(8).py(2).rounded(10).bg(t.raised)
-        .child(div().size(6).rounded(3).bg(tone))
-        .child(div().text_size(11).text_color(t.muted).child(label))))
-      .child(div().flex_1())
+    const sessionTitle = mine ? this.title : null;
+    const header = h_flex().h(54).px(14).items_center().gap(10).flex_none().border_b(1).border_color(t.border)
+      .child(v_flex().flex_1().min_w(0).gap(2)
+        .child(div().id("omp-title").truncate().font_semibold().text_color(t.foreground).tooltip(sessionTitle || "OMP").child(sessionTitle || "OMP"))
+        .when(Boolean(label), el => el.child(h_flex().gap(6).items_center()
+          .child(div().size(6).flex_none().rounded(3).bg(tone))
+          .child(div().text_size(11).text_color(t.muted).child(label)))))
       .child(div().id("close-omp-todos").size(22).flex().items_center().justify_center().rounded(5).text_color(t.dim)
         .hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("Hide panel (Ctrl+Shift+U)")
         .on_click(() => run("layout.hide", { id: "omp-todos" })).child(svg("mods/pane/close.svg").size(12)));

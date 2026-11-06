@@ -193,6 +193,21 @@ def diff_text(details, limit=8000):
     return text if len(text) <= limit else text[:limit] + '\n… (truncated)'
 
 
+def session_title(path):
+    """omp's own name for the session (first record of the file), without a leading emoji or "OMP:" tag."""
+    try:
+        with open(path, 'rb') as f:
+            record = json.loads(f.readline())
+    except (OSError, ValueError):
+        return None
+    title = record.get('title') if record.get('type') == 'title' else None
+    if not isinstance(title, str):
+        return None
+    title = re.sub(r'^[^\w]+', '', title).strip()
+    title = re.sub(r'^OMP:\s*', '', title, flags=re.I)
+    return title or None
+
+
 def session_data(path, cwd, pid):
     phases, calls, workers, model, effort = [], {}, {}, None, None
     tokens = None
@@ -310,6 +325,7 @@ def session_data(path, cwd, pid):
         'window': context_window(pid, (model or '').split(':')[0]) if model else None,
         'limits': usage_limits(pid, model.split('/')[0]) if model and '/' in model else [],
         'branch': git_branch(cwd),
+        'title': session_title(path),
         'cwd': cwd,
     }
 
