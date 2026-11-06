@@ -1,6 +1,10 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { agents, focused, hc, exec, appHome, theme, run, openOverlay } from "herdr";
+import { agents, focused, hc, exec, appHome, theme, run, openOverlay, readTextFile } from "herdr";
+
+// A remote terminal's address is "machine/t7"; local ones have no prefix.
+const machineOf = address => (address?.includes("/") ? address.split("/")[0] : null);
+let readerSource = null;
 
 function selected() {
   const f = focused();
@@ -56,11 +60,6 @@ export default class OmpTodos extends View {
       this.loading = false;
     }
     if (!address || this.loading) { cx.notify(); return; }
-    if (address.includes("/")) {
-      this.error = "Remote OMP sessions are not supported.";
-      cx.notify();
-      return;
-    }
     this.loading = true;
     cx.spawn(async cx => {
       try {
@@ -69,7 +68,9 @@ export default class OmpTodos extends View {
         const info = JSON.parse(terminal.stdout);
         const pid = info.foreground?.pid;
         if (!pid || info.foreground?.name !== "omp") throw new Error("OMP is not the foreground process");
-        const result = await exec("python3", [`${appHome()}/mods/omp-todos/read.py`, String(pid)]);
+        // read.py runs on the terminal's own machine: the session file and process live there.
+        readerSource ??= await readTextFile(`${appHome()}/mods/omp-todos/read.py`);
+        const result = await exec("python3", ["-c", readerSource, String(pid)], { on: machineOf(address) });
         if (result.code !== 0) throw new Error(result.stderr || "Cannot read OMP session");
         const data = JSON.parse(result.stdout);
         if (this.address !== address || selected() !== address) return;
@@ -97,7 +98,7 @@ export default class OmpTodos extends View {
   // Sends /compact to OMP, which summarises the conversation to free context.
   compactContext(cx) {
     const address = selected();
-    if (!address || this.switching || address.includes("/")) return;
+    if (!address || this.switching) return;
     this.switching = true;
     this.switchError = null;
     cx.spawn(async cx => {
@@ -116,7 +117,7 @@ export default class OmpTodos extends View {
   // Presses Shift+Tab until OMP's status line shows the wanted effort.
   setEffort(cx, target) {
     const address = selected();
-    if (!address || this.switching || address.includes("/") || target === this.effort) return;
+    if (!address || this.switching || target === this.effort) return;
     this.switching = true;
     this.switchError = null;
     cx.spawn(async cx => {
@@ -177,7 +178,8 @@ export default class OmpTodos extends View {
     const busy = status === "working" || status === "blocked";
     const elapsed = turn?.started ? duration((busy ? now : lastEnd || now) - turn.started) : null;
     const counts = Object.entries(turn?.counts ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, n]) => `${n} ${name}`).join(" · ");
-    const open = path => openOverlay({ mod: "omp-detail", kind: "dialog", width: 680, height: 560, props: { path } });
+    const machine = machineOf(address);
+    const open = path => openOverlay({ mod: "omp-detail", kind: "dialog", width: 680, height: 560, props: { path, machine } });
     const canControl = (status === "idle" || status === "done") && !this.switching;
     const tone = status === "blocked" ? t.blocked : status === "working" ? t.working : status === "done" ? t.done : t.idle;
     const label = { blocked: "Needs you", working: "Working", done: "Done", idle: "Idle" }[status] ?? "";

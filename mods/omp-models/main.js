@@ -67,8 +67,9 @@ async function applyModel(address, model) {
 async function loadCatalog(address) {
   const info = await hc(["get", address, "--json"]);
   const pid = JSON.parse(info.stdout).foreground?.pid;
-  const exe = (await exec("sh", ["-c", 'readlink -f "/proc/$0/exe" 2>/dev/null || ps -o comm= -p "$0"', String(pid)])).stdout.trim();
-  const result = await exec(exe, ["models", "--json"]);
+  const on = address.includes("/") ? address.split("/")[0] : null;
+  const exe = (await exec("sh", ["-c", 'readlink -f "/proc/$0/exe" 2>/dev/null || ps -o comm= -p "$0"', String(pid)], { on })).stdout.trim();
+  const result = await exec(exe, ["models", "--json"], { on });
   if (result.code !== 0) throw new Error(result.stderr || "Cannot list models");
   return (JSON.parse(result.stdout).models ?? []).filter((m) => m.kind === "chat");
 }
@@ -77,7 +78,8 @@ export default class OmpModels extends View {
   init(_props, cx) {
     this.address = props()?.address;
     this.current = props()?.model;
-    this.models = shared(CACHE) ?? [];
+    this.cacheKey = `${CACHE}:${this.address?.split("/")[0] ?? ""}`;
+    this.models = shared(this.cacheKey) ?? [];
     this.cursor = 0;
     this.offset = 0;
     this.areaHeight = 400;
@@ -91,7 +93,7 @@ export default class OmpModels extends View {
     cx.spawn(async (cx) => {
       try {
         this.models = await loadCatalog(this.address);
-        setShared(CACHE, this.models);
+        setShared(this.cacheKey, this.models);
         this.error = null;
       } catch (e) { if (!this.models.length) this.error = String(e); }
       cx.notify();

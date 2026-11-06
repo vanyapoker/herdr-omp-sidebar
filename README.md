@@ -23,7 +23,7 @@ cd herdr-omp-sidebar
 
 Options (passed through to `install.py`): `--home DIR` (default `~/.config/herdr-app`), `--layout NAME` (default `my`), `--no-toolbar`.
 
-Requirements: `omp`, `python3`, `lsof` (preinstalled on macOS), and Herdr's OMP extension (`~/.omp/agent/extensions/herdr-omp-agent-state.ts`) so the panel can see idle/working state.
+Requirements: `omp`, `python3`, `lsof` (preinstalled on macOS) on whichever machine runs omp, and Herdr's OMP extension (`~/.omp/agent/extensions/herdr-omp-agent-state.ts`) so the panel can see idle/working state.
 
 The installer is idempotent and backs up everything it replaces as `*.bak`. It adds the mods, the OMP program entry and icon, the shortcut, and the panel block in your layout's `work-body`. If it can't find `work-body`, it prints the block to paste in by hand.
 
@@ -34,7 +34,7 @@ The installer is idempotent and backs up everything it replaces as `*.bak`. It a
 
 ## Limits
 
-- **Local terminals only.** Terminals on another machine (Herdr SSH spaces) show "Remote OMP sessions are not supported". The panel reads omp's session file and process from this computer, and both live on the remote host.
+- **Remote terminals (Herdr SSH machines)** run `read.py` and `omp models` on the machine where omp runs, so that machine needs `python3` (and `lsof` if it is a Mac) but not this repo. Install the sidebar only on the computer that runs the Herdr app. Remote support is untested against a real second machine.
 - `mods/tabs-address` is a modified copy of Herdr's mod (adds the toolbar button) from one Herdr version. Use `--no-toolbar` or diff it first if yours differs.
 - Effort and model changes work only while omp is idle; they drive omp's own `Shift+Tab` and `Alt+P`.
 - Tested on Linux. The macOS path (`lsof`, `ps`) is untested on a Mac.

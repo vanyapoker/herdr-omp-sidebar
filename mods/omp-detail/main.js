@@ -8,7 +8,7 @@ export default class OmpDetail extends View {
     this.error = null;
     cx.spawn(async cx => {
       try {
-        const text = await readTextFile(this.path);
+        const text = await readTextFile(this.path, { on: props()?.machine ?? null });
         if (text === null) this.error = "File is no longer available.";
         else if (text.includes("\0")) this.error = "Binary file cannot be previewed.";
         else this.editor = EditorState.new({ language: this.path.split(".").pop() || "txt", readonly: true, value: text });
