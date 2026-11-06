@@ -4,7 +4,7 @@ A panel next to the focused **omp** terminal in the Herdr app.
 
 | | |
 |---|---|
-| **Activity** | what omp is doing now, elapsed time, the last tool calls |
+| **Activity** | what omp is doing now, elapsed time, this turn's tool calls (repeats fold into `read ×6`; click one for its command and output, hover for the full text; task calls show their subagents and what each is doing) |
 | **Tasks** | omp's todo list with progress, completed ones collapsible |
 | **Subagents** | running and finished workers, with a viewer for their reports |
 | **Status** | context use (amber at 60%, red at 80%, with a **Compact** button), session cost, git branch, folder |

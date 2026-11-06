@@ -6,6 +6,7 @@ import sys
 from datetime import datetime
 
 MAX_ACTIONS = 100
+BODY_ACTIONS = 40
 
 
 def parse_ms(text):
@@ -58,6 +59,45 @@ def file_target(name, args, base):
     target = re.sub(r':(?:\d.*|raw)$', '', target)
     target = os.path.abspath(os.path.join(base, os.path.expanduser(target)))
     return target if os.path.isfile(target) else None
+
+def args_text(name, args, limit=1500):
+    """The call's arguments as plain text, for the detail viewer."""
+    if not isinstance(args, dict):
+        return ''
+    text = args.get('command') if name == 'bash' else args.get('input') if name == 'edit' else None
+    if not isinstance(text, str):
+        text = json.dumps(args, indent=1, ensure_ascii=False)
+    return text if len(text) <= limit else text[:limit] + '\n… (truncated)'
+
+
+def result_text(msg, limit=1500):
+    content = msg.get('content')
+    if isinstance(content, list):
+        content = '\n'.join(c.get('text', '') for c in content if isinstance(c, dict) and c.get('type') == 'text')
+    if not isinstance(content, str):
+        return ''
+    return content if len(content) <= limit else content[:limit] + '\n… (truncated)'
+
+
+def worker_activity(path):
+    """Tool count, current and latest tool of one subagent's transcript."""
+    labels, order, finished = {}, [], set()
+    try:
+        with open(path, 'rb') as f:
+            for line in f:
+                try:
+                    if b'"tool_execution_start"' in line:
+                        data = json.loads(line).get('data') or {}
+                        labels[data.get('toolCallId')] = data.get('intent') or data.get('toolName')
+                        order.append(data.get('toolCallId'))
+                    elif b'"role":"toolResult"' in line:
+                        finished.add((json.loads(line).get('message') or {}).get('toolCallId'))
+                except (ValueError, AttributeError):
+                    continue
+    except OSError:
+        return {}
+    pending = [i for i in order if i not in finished]
+    return {'tools': len(order), 'current': labels[pending[-1]] if pending else None, 'last': labels[order[-1]] if order else None}
 
 
 def context_window(pid, model):
@@ -129,6 +169,10 @@ def session_data(path, cwd, pid):
                         'started': parse_ms(data.get('startedAt')),
                         'state': 'running',
                     }
+                    action['id'] = ident
+                    action['input'] = args_text(name, args)
+                    if name == 'task' and isinstance(args, dict):
+                        action['names'] = [t.get('name') for t in args.get('tasks', []) if isinstance(t, dict) and t.get('name')]
                     target = file_target(name, args, cwd)
                     if target:
                         action['path'] = target
@@ -144,6 +188,7 @@ def session_data(path, cwd, pid):
                 if action:
                     action['state'] = 'error' if msg.get('isError') else 'done'
                     action['ended'] = msg.get('timestamp')
+                    action['output'] = result_text(msg)
                 details = msg.get('details') or {}
                 if msg.get('isError'):
                     continue
@@ -174,6 +219,22 @@ def session_data(path, cwd, pid):
     counts = {}
     for action in ordered:
         counts[action['tool']] = counts.get(action['tool'], 0) + 1
+    # Subagent progress comes from each worker's own transcript; only running workers
+    # and the ones this turn's task calls named are read.
+    wanted = {w['id'] for w in workers.values() if w.get('status') in ('started', 'running')}
+    for action in ordered:
+        wanted.update(action.get('names', []))
+    for ident in wanted:
+        if ident in workers and re.fullmatch(r'[A-Za-z0-9_-]+', ident):
+            transcript = os.path.join(session_dir, ident + '.jsonl')
+            if os.path.isfile(transcript):
+                workers[ident].update(worker_activity(transcript))
+    for action in ordered:
+        if 'names' in action:
+            action['workers'] = [workers[n] for n in action.pop('names') if n in workers]
+    for action in ordered[:-BODY_ACTIONS]:
+        action.pop('input', None)
+        action.pop('output', None)
     return {
         'phases': phases,
         'turn': {'started': turn['started'], 'tools': len(ordered), 'counts': counts},

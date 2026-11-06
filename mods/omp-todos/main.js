@@ -177,7 +177,13 @@ export default class OmpTodos extends View {
     const now = Date.now();
     const running = actions.find(a => a.state === "running");
     const finished = actions.filter(a => a !== running);
-    const recent = this.showAllActions ? finished : finished.slice(0, 5);
+    const entries = [];
+    for (const item of finished) {
+      const last = entries[entries.length - 1];
+      if (last && last.tool === item.tool && item.tool !== "task" && item.tool !== "ask") last.items.push(item);
+      else entries.push({ tool: item.tool, items: [item] });
+    }
+    const shownEntries = this.showAllActions ? entries : entries.slice(0, 5);
     const lastEnd = actions.reduce((latest, a) => Math.max(latest, a.ended ?? 0), 0);
     const busy = status === "working" || status === "blocked";
     const elapsed = turn?.started ? duration((busy ? now : lastEnd || now) - turn.started) : null;
@@ -207,6 +213,44 @@ export default class OmpTodos extends View {
     const headline = status === "blocked" ? running?.reason || "Needs your input"
       : status === "working" ? running?.label || "Thinking…"
       : status === "done" ? "Finished" : "Idle";
+    // Subagents: a task call lists the workers it started, each with what it is doing now.
+    const dotTone = w => w.status === "completed" ? t.done : w.status === "failed" || w.status === "blocked" ? t.blocked : t.working;
+    const workerLines = (list, indent) => v_flex().gap(1).pl(indent).children(list.map(w => h_flex().gap(6).items_center().px(4)
+      .child(div().size(5).flex_none().rounded(3).bg(dotTone(w)))
+      .child(div().flex_none().max_w(110).truncate().text_size(11).text_color(t.muted).child(w.id))
+      .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim)
+        .child(w.current ? w.current : w.tools ? `${w.tools} tools${w.last ? ` · ${w.last}` : ""}` : ""))));
+    const brief = text => { const s = String(text).replace(/\s+/g, " ").trim(); return s.length > 300 ? `${s.slice(0, 299)}…` : s; };
+    const openText = item => openOverlay({ mod: "omp-detail", kind: "dialog", width: 680, height: 560,
+      props: { title: `${item.tool} · ${item.label}`, text: `${item.input ?? item.detail ?? item.label}${item.output ? `\n\n── output ──\n${item.output}` : ""}` } });
+    const actionRow = (item, indent = 0) => {
+      const failed = item.state === "error";
+      const took = item.started && item.ended && item.ended - item.started >= 1000 ? duration(item.ended - item.started) : "";
+      return v_flex()
+        .child(h_flex().id(`activity-${item.id}`).gap(7).items_center().pr(4).py(2).pl(4 + indent).rounded(4).cursor_pointer().hover(s => s.bg(t.hover))
+          .tooltip(item.path ? `Open ${item.path}` : brief(item.input || item.detail || item.label))
+          .on_click(() => (item.path ? open(item.path) : openText(item)))
+          .child(div().w(10).flex_none().text_size(11).text_color(failed ? t.blocked : t.done).child(failed ? "✗" : "✓"))
+          .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(item.label))
+          .child(div().flex_none().text_size(11).text_color(t.dim).child(took)))
+        .when(Boolean(item.workers?.length), c => c.child(workerLines(item.workers, 21 + indent)));
+    };
+    // Consecutive calls of one tool fold into "read ×6"; the oldest call's id keys the open state.
+    this.openGroups ??= new Set();
+    const groupRow = entry => {
+      const key = entry.items[entry.items.length - 1].id;
+      const expanded = this.openGroups.has(key);
+      const failures = entry.items.filter(i => i.state === "error").length;
+      return v_flex()
+        .child(h_flex().id(`activity-group-${key}`).gap(7).items_center().px(4).py(2).rounded(4).cursor_pointer().hover(s => s.bg(t.hover))
+          .tooltip(expanded ? "Hide the calls" : "Show each call")
+          .on_click((_e, cx) => { if (expanded) this.openGroups.delete(key); else this.openGroups.add(key); cx.notify(); })
+          .child(div().w(10).flex_none().text_size(11).text_color(failures ? t.blocked : t.done).child(failures ? "✗" : "✓"))
+          .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(`${entry.tool} ×${entry.items.length}`))
+          .child(div().flex_none().text_size(11).text_color(t.dim).child(failures ? `${failures} failed` : ""))
+          .child(svg(`mods/files/chevron-${expanded ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim)))
+        .when(expanded, c => c.child(v_flex().gap(1).children(entry.items.map(i => actionRow(i, 14)))));
+    };
     const activity = v_flex().gap(8).p(10).rounded(8).bg(t.surface).border(1).border_color(t.border)
       .child(h_flex().gap(8).items_center()
         .child(status === "working"
@@ -216,18 +260,11 @@ export default class OmpTodos extends View {
         .when(Boolean(elapsed), row => row.child(div().flex_none().text_size(11).text_color(t.dim).child(busy ? elapsed : `took ${elapsed}`))))
       .when(Boolean(running?.detail), c => c.child(div().text_size(11).text_color(t.dim).truncate().child(running.detail)))
       .when(status === "working" && !running && lastEnd > 0, c => c.child(div().text_size(11).text_color(t.dim).child(`Last tool finished ${duration(now - lastEnd)} ago`)))
-      .when(recent.length > 0, c => c.child(v_flex().gap(2).pt(8).border_t(1).border_color(t.border)
-        .children(recent.map((item, i) => {
-          const failed = item.state === "error";
-          const took = item.started && item.ended && item.ended - item.started >= 1000 ? duration(item.ended - item.started) : "";
-          return h_flex().id(`activity-${i}`).gap(7).items_center().px(4).py(2).rounded(4)
-            .when(Boolean(item.path), el => el.cursor_pointer().hover(s => s.bg(t.hover)).tooltip(`Open ${item.path}`).on_click(() => open(item.path)))
-            .child(div().w(10).flex_none().text_size(11).text_color(failed ? t.blocked : t.done).child(failed ? "✗" : "✓"))
-            .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(item.label))
-            .child(div().flex_none().text_size(11).text_color(t.dim).child(took));
-        })))
-        .when(finished.length > 5, c => c.child(toggle("omp-toggle-actions", this.showAllActions ? "Show fewer" : `${finished.length - 5} more`, Boolean(this.showAllActions),
-          (_e, cx) => { this.showAllActions = !this.showAllActions; cx.notify(); }))))
+      .when(Boolean(running?.workers?.length), c => c.child(workerLines(running.workers, 17)))
+      .when(shownEntries.length > 0, c => c.child(v_flex().gap(2).pt(8).border_t(1).border_color(t.border)
+        .children(shownEntries.map(entry => entry.items.length > 1 ? groupRow(entry) : actionRow(entry.items[0])))
+        .when(entries.length > 5, c => c.child(toggle("omp-toggle-actions", this.showAllActions ? "Show fewer" : `${entries.length - 5} more`, Boolean(this.showAllActions),
+          (_e, cx) => { this.showAllActions = !this.showAllActions; cx.notify(); })))))
       .when(Boolean(counts), c => c.child(div().text_size(11).text_color(t.dim).child(`${turn.tools} tool calls · ${counts}`)));
 
     const hideDone = !this.showDone && doneCount > 0 && doneCount < tasks.length;
@@ -258,12 +295,14 @@ export default class OmpTodos extends View {
     const workerTone = w => w.status === "completed" ? t.done : w.status === "failed" || w.status === "blocked" ? t.blocked : t.working;
     const subagents = v_flex().gap(8)
       .child(section("Subagents", runningWorkers ? `${runningWorkers} running · ${workers.length}` : `${workers.length}`))
-      .child(v_flex().gap(2).children(shownWorkers.map((worker, i) => h_flex().gap(8).items_center().px(8).py(5).rounded(6)
-        .child(div().size(6).flex_none().rounded(3).bg(workerTone(worker)))
-        .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(worker.id))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(worker.status === "started" ? "running" : worker.status))
-        .when(Boolean(worker.report), row => row.child(div().id(`worker-report-${i}`).flex_none().text_size(11).cursor_pointer().text_color(t.accent)
-          .hover(s => s.text_color(t.foreground)).on_click(() => open(worker.report)).child("View"))))))
+      .child(v_flex().gap(2).children(shownWorkers.map((worker, i) => v_flex()
+        .child(h_flex().gap(8).items_center().px(8).py(5).rounded(6)
+          .child(div().size(6).flex_none().rounded(3).bg(workerTone(worker)))
+          .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(worker.id))
+          .child(div().flex_none().text_size(11).text_color(t.dim).child(worker.status === "started" ? "running" : worker.status))
+          .when(Boolean(worker.report), row => row.child(div().id(`worker-report-${i}`).flex_none().text_size(11).cursor_pointer().text_color(t.accent)
+            .hover(s => s.text_color(t.foreground)).on_click(() => open(worker.report)).child("View"))))
+        .when(Boolean(worker.current), c => c.child(div().pl(22).pr(8).text_size(11).truncate().text_color(t.dim).child(`${worker.tools ? `${worker.tools} tools · ` : ""}${worker.current}`))))))
       .when(workers.length > 5, c => c.child(toggle("omp-toggle-workers", this.showAllWorkers ? "Show fewer" : `${workers.length - 5} more`, Boolean(this.showAllWorkers),
         (_e, cx) => { this.showAllWorkers = !this.showAllWorkers; cx.notify(); })));
 
