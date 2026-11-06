@@ -1,3 +1,4 @@
+import time
 import subprocess
 import json
 import os
@@ -100,6 +101,53 @@ def worker_activity(path):
     return {'tools': len(order), 'current': labels[pending[-1]] if pending else None, 'last': labels[order[-1]] if order else None}
 
 
+def omp_exe(pid):
+    if os.path.isdir('/proc'):
+        return os.path.realpath(f'/proc/{pid}/exe')
+    return subprocess.run(['ps', '-o', 'comm=', '-p', str(pid)], capture_output=True, text=True, timeout=5).stdout.strip()
+
+
+def usage_limits(pid, provider, ttl=60):
+    """Rate-limit windows (5 hours, 7 days, ...) of the provider's account, from `omp usage`; cached for a minute."""
+    cache = os.path.expanduser('~/.cache/omp-todos-usage.json')
+    try:
+        with open(cache) as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        saved = {}
+    entry = saved.get(provider)
+    if entry and time.time() - entry['at'] < ttl:
+        return entry['limits']
+    try:
+        out = subprocess.run([omp_exe(pid), 'usage', '--json', '--provider', provider], capture_output=True, text=True, timeout=20).stdout
+        limits = []
+        for report in json.loads(out).get('reports', []):
+            if report.get('provider') != provider:
+                continue
+            for limit in report.get('limits', []):
+                amount, window = limit.get('amount') or {}, limit.get('window') or {}
+                if amount.get('usedFraction') is None:
+                    continue
+                limits.append({
+                    'label': window.get('label') or limit.get('label'),
+                    'window': window.get('id'),
+                    'used': amount['usedFraction'],
+                    'unit': amount.get('unit'),
+                    'remaining': amount.get('remaining'),
+                    'limit': amount.get('limit'),
+                    'resetsAt': window.get('resetsAt'),
+                    'status': limit.get('status'),
+                })
+            break
+        saved[provider] = {'at': time.time(), 'limits': limits}
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        with open(cache, 'w') as f:
+            json.dump(saved, f)
+        return limits
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return entry['limits'] if entry else []
+
+
 def context_window(pid, model):
     """Context window of a model, from OMP's catalog (cached after the first lookup)."""
     cache = os.path.expanduser('~/.cache/omp-todos-windows.json')
@@ -110,7 +158,7 @@ def context_window(pid, model):
         windows = {}
     if model not in windows:
         try:
-            exe = os.path.realpath(f'/proc/{pid}/exe') if os.path.isdir('/proc') else subprocess.run(['ps', '-o', 'comm=', '-p', str(pid)], capture_output=True, text=True, timeout=5).stdout.strip()
+            exe = omp_exe(pid)
             out = subprocess.run([exe, 'models', '--json'], capture_output=True, text=True, timeout=20).stdout
             catalog = json.loads(out)
             catalog = catalog.get('models', []) if isinstance(catalog, dict) else catalog
@@ -245,6 +293,7 @@ def session_data(path, cwd, pid):
         'cost': cost,
         'tokens': tokens,
         'window': context_window(pid, (model or '').split(':')[0]) if model else None,
+        'limits': usage_limits(pid, model.split('/')[0]) if model and '/' in model else [],
         'branch': git_branch(cwd),
         'cwd': cwd,
     }

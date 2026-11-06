@@ -29,6 +29,14 @@ function duration(ms) {
   return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+// "in 3h 12m", "in 2d 4h": how long until a rate-limit window resets.
+function resetIn(ms) {
+  const m = Math.max(0, Math.round(ms / 60000));
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 48 ? `in ${h}h ${m % 60}m` : `in ${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
 export default class OmpTodos extends View {
   init(_props, cx) {
     this.address = null;
@@ -86,7 +94,7 @@ export default class OmpTodos extends View {
         this.workers = data.workers ?? [];
         this.status = info.status?.state ?? null;
         this.model = data.model ?? null;
-        this.stats = { cost: data.cost, tokens: data.tokens, window: data.window, branch: data.branch, cwd: data.cwd };
+        this.stats = { cost: data.cost, tokens: data.tokens, window: data.window, branch: data.branch, cwd: data.cwd, limits: data.limits };
         this.effort = live ?? data.effort ?? null;
         this.error = data.error ?? null;
       } catch (e) {
@@ -345,6 +353,18 @@ export default class OmpTodos extends View {
             .child(div().min_w(0).truncate().text_color(ctxTone ?? t.foreground).child(pct != null ? `${pct}% · ${compact(stats.tokens)} / ${compact(stats.window)}` : compact(stats.tokens))))
           .when(pct != null, b => b.child(div().h(3).rounded(2).bg(t.border).child(div().h(3).rounded(2).w(`${pct}%`).bg(ctxTone ?? t.accent))))))
         .when(stats.cost != null, c => c.child(stat("Cost", `$${stats.cost.toFixed(2)}`)))
+        .when((stats.limits ?? []).length > 0, c => c.child(v_flex().gap(6).pt(4)
+          .children(stats.limits.map(limit => {
+            const used = Math.min(1, Math.max(0, limit.used));
+            const tone = limit.status === "exhausted" || used >= 0.85 ? t.blocked : used >= 0.6 ? t.working : null;
+            const left = limit.unit === "percent" ? `${Math.round((1 - used) * 100)}% left` : limit.remaining != null ? `${compact(limit.remaining)} left` : `${Math.round((1 - used) * 100)}% left`;
+            const reset = limit.resetsAt ? resetIn(limit.resetsAt - Date.now()) : null;
+            return v_flex().gap(4)
+              .child(h_flex().gap(8).items_center().justify_between()
+                .child(div().flex_none().text_color(t.dim).child(`${limit.label} limit`))
+                .child(div().min_w(0).truncate().text_color(tone ?? t.foreground).child(reset ? `${left} · resets ${reset}` : left)))
+              .child(div().h(3).rounded(2).bg(t.border).child(div().h(3).rounded(2).w(`${Math.round(used * 100)}%`).bg(tone ?? t.accent)));
+          }))))
         .when(Boolean(stats.branch), c => c.child(stat("Branch", stats.branch)))
         .when(Boolean(stats.cwd), c => c.child(stat("Folder", stats.cwd.replace(/^\/(home|Users)\/[^/]+/, "~").split("/").slice(-2).join("/")))))
       .when(!address || Boolean(error), el => el.child(div().text_color(t.dim).child("Unavailable")));
