@@ -227,6 +227,9 @@ def session_data(path, cwd, pid):
                 if msg.get('role') == 'user':
                     turn = {'started': msg.get('timestamp'), 'actions': {}, 'order': []}
                 if msg.get('role') == 'assistant':
+                    # A session that never switched models has no model_change record; its replies name the model.
+                    if msg.get('provider') and msg.get('model'):
+                        model = f"{msg['provider']}/{msg['model']}"
                     usage = msg.get('usage') or {}
                     tokens = usage.get('totalTokens') or tokens
                     for call in msg.get('content', []):
