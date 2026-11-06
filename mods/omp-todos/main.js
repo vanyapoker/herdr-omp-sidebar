@@ -22,6 +22,16 @@ const effortOf = (screen) => {
   return EFFORTS.find(([, g]) => g === glyph)?.[0] ?? null;
 };
 
+// One icon and colour per kind of tool call; anything unlisted (MCP tools, debug, ...) gets the wrench.
+const TOOL_ICONS = {
+  read: ["read", "ansi4"], write: ["write", "ansi3"], edit: ["edit", "ansi3"], ast_edit: ["edit", "ansi3"],
+  bash: ["bash", "ansi2"], eval: ["code", "ansi2"], lsp: ["code", "ansi6"],
+  grep: ["search", "ansi6"], glob: ["search", "ansi6"], ast_grep: ["search", "ansi6"], find: ["search", "ansi6"],
+  web_search: ["web", "ansi5"], browser: ["web", "ansi5"], fetch: ["web", "ansi5"],
+  task: ["agent", "ansi5"], wait: ["agent", "ansi5"], todo: ["todo", "ansi4"], ask: ["ask", "ansi1"],
+};
+const toolIcon = tool => TOOL_ICONS[tool] ?? ["tool", "muted"];
+
 function duration(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `${s}s`;
@@ -241,8 +251,8 @@ export default class OmpTodos extends View {
         .child(h_flex().id(`activity-${item.id}`).gap(7).items_center().pr(4).py(2).pl(4 + indent).rounded(4).cursor_pointer().hover(s => s.bg(t.hover))
           .tooltip(item.diff ? `Show the diff${item.path ? ` of ${item.path}` : ""}` : item.path ? `Open ${item.path}` : brief(item.input || item.detail || item.label))
           .on_click(() => (item.diff ? openDiff(item) : item.path ? open(item.path) : openText(item)))
-          .child(div().w(10).flex_none().text_size(11).text_color(failed ? t.blocked : t.done).child(failed ? "✗" : "✓"))
-          .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(item.label))
+          .child(svg(`mods/omp-todos/icons/${toolIcon(item.tool)[0]}.svg`).size(13).flex_none().text_color(failed ? t.blocked : t[toolIcon(item.tool)[1]]))
+          .child(div().flex_1().min_w(0).truncate().text_color(failed ? t.blocked : t.muted).child(item.label))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(took)))
         .when(Boolean(item.workers?.length), c => c.child(workerLines(item.workers, 21 + indent)));
     };
@@ -256,7 +266,7 @@ export default class OmpTodos extends View {
         .child(h_flex().id(`activity-group-${key}`).gap(7).items_center().px(4).py(2).rounded(4).cursor_pointer().hover(s => s.bg(t.hover))
           .tooltip(expanded ? "Hide the calls" : "Show each call")
           .on_click((_e, cx) => { if (expanded) this.openGroups.delete(key); else this.openGroups.add(key); cx.notify(); })
-          .child(div().w(10).flex_none().text_size(11).text_color(failures ? t.blocked : t.done).child(failures ? "✗" : "✓"))
+          .child(svg(`mods/omp-todos/icons/${toolIcon(entry.tool)[0]}.svg`).size(13).flex_none().text_color(failures ? t.blocked : t[toolIcon(entry.tool)[1]]))
           .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(`${entry.tool} ×${entry.items.length}`))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(failures ? `${failures} failed` : ""))
           .child(svg(`mods/files/chevron-${expanded ? "down" : "right"}.svg`).size(11).flex_none().text_color(t.dim)))
