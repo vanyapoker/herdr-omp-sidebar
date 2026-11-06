@@ -181,7 +181,7 @@ def git_branch(cwd):
 
 def session_data(path, cwd, pid):
     phases, calls, workers, model, effort = [], {}, {}, None, None
-    cost, tokens = 0.0, None
+    tokens = None
     turn = {'started': None, 'actions': [], 'order': []}
     session_dir = os.path.splitext(path)[0]
     with open(path, 'rb') as f:
@@ -199,7 +199,6 @@ def session_data(path, cwd, pid):
                     turn = {'started': msg.get('timestamp'), 'actions': {}, 'order': []}
                 if msg.get('role') == 'assistant':
                     usage = msg.get('usage') or {}
-                    cost += (usage.get('cost') or {}).get('total') or 0
                     tokens = usage.get('totalTokens') or tokens
                     for call in msg.get('content', []):
                         if call.get('type') == 'toolCall':
@@ -290,7 +289,6 @@ def session_data(path, cwd, pid):
         'workers': list(workers.values())[::-1],
         'model': model,
         'effort': effort,
-        'cost': cost,
         'tokens': tokens,
         'window': context_window(pid, (model or '').split(':')[0]) if model else None,
         'limits': usage_limits(pid, model.split('/')[0]) if model and '/' in model else [],

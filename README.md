@@ -7,7 +7,7 @@ A panel next to the focused **omp** terminal in the Herdr app.
 | **Activity** | what omp is doing now, elapsed time, this turn's tool calls (repeats fold into `read ×6`; click one for its command and output, hover for the full text; task calls show their subagents and what each is doing) |
 | **Tasks** | omp's todo list with progress, completed ones collapsible |
 | **Subagents** | running and finished workers, with a viewer for their reports |
-| **Status** | the provider's 5-hour and 7-day limits (left, reset time, from `omp usage`), context use (amber at 60%, red at 80%, with a **Compact** button), session cost, git branch, folder |
+| **Status** | the provider's 5-hour and 7-day limits (left, reset time, from `omp usage`), context use (amber at 60%, red at 80%, with a **Compact** button), git branch, folder |
 | **Model** | searchable picker for omp's catalog, with pinned favourites (Ctrl+F) |
 | **Effort** | one-click thinking level (off to max) |
 

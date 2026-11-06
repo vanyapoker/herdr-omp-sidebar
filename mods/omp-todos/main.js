@@ -94,7 +94,7 @@ export default class OmpTodos extends View {
         this.workers = data.workers ?? [];
         this.status = info.status?.state ?? null;
         this.model = data.model ?? null;
-        this.stats = { cost: data.cost, tokens: data.tokens, window: data.window, branch: data.branch, cwd: data.cwd, limits: data.limits };
+        this.stats = { tokens: data.tokens, window: data.window, branch: data.branch, cwd: data.cwd, limits: data.limits };
         this.effort = live ?? data.effort ?? null;
         this.error = data.error ?? null;
       } catch (e) {
@@ -353,7 +353,6 @@ export default class OmpTodos extends View {
               .on_click((_e, cx) => this.compactContext(cx)).child("Compact")))
             .child(div().min_w(0).truncate().text_color(ctxTone ?? t.foreground).child(pct != null ? `${pct}% · ${compact(stats.tokens)} / ${compact(stats.window)}` : compact(stats.tokens))))
           .when(pct != null, b => b.child(div().h(3).rounded(2).bg(t.border).child(div().h(3).rounded(2).w(`${pct}%`).bg(ctxTone ?? t.accent))))))
-        .when(stats.cost != null, c => c.child(stat("Cost", `$${stats.cost.toFixed(2)}`)))
         .when((stats.limits ?? []).length > 0, c => c.child(v_flex().gap(6).pt(4)
           .children(stats.limits.map(limit => {
             const used = Math.min(1, Math.max(0, limit.used));
