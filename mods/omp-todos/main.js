@@ -14,8 +14,11 @@ function selected() {
 
 // OMP shows the thinking effort as a glyph in its status line; Shift+Tab cycles through them.
 const EFFORTS = [["off", "⦸"], ["low", "◔"], ["medium", "◑"], ["high", "◒"], ["xhigh", "◕"], ["max", "◉"], ["auto", "⟳"]];
+// The glyph leads the model segment: "π > ◑ Sonnet" in the default status line, "── ◑ Sonnet" in a minimal one.
+// Only the screen's last lines are searched, so a glyph in the transcript is never mistaken for it.
 const effortOf = (screen) => {
-  const glyph = /π > (\S) /.exec(screen ?? "")?.[1];
+  const tail = (screen ?? "").split("\n").slice(-6).join("\n");
+  const glyph = /(?:π > |[─╭┌]+ )([^\s\w]) \S/.exec(tail)?.[1];
   return EFFORTS.find(([, g]) => g === glyph)?.[0] ?? null;
 };
 
