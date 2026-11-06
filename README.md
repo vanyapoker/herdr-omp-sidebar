@@ -1,6 +1,6 @@
 # OMP sidebar for Herdr
 
-A panel next to the focused **omp** terminal in the [Herdr](https://github.com/) app.
+A panel next to the focused **omp** terminal in the Herdr app.
 
 | | |
 |---|---|
