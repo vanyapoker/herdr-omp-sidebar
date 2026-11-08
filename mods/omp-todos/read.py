@@ -411,12 +411,15 @@ def open_files(pid):
 def main():
     pid = int(sys.argv[1])
     cwd = process_cwd(pid)
-    for path in open_files(pid):
-        if '/sessions/' in path and path.endswith('.jsonl') and os.path.isfile(path):
-            # `read.py <pid> --changes turn|session` lists the files omp changed instead of the usual summary.
-            scope = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == '--changes' else None
-            print(json.dumps(session_data(path, cwd, pid, scope)))
-            return
+    # omp also holds its running subagents' transcripts open (<project>/<session>/<Name>.jsonl);
+    # the session itself is the file directly inside the project folder.
+    sessions = [p for p in open_files(pid) if '/sessions/' in p and p.endswith('.jsonl') and os.path.isfile(p)]
+    sessions.sort(key=lambda p: (len(p.split('/sessions/', 1)[1].split('/')) != 2, -os.path.getmtime(p)))
+    if sessions:
+        # `read.py <pid> --changes turn|session` lists the files omp changed instead of the usual summary.
+        scope = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == '--changes' else None
+        print(json.dumps(session_data(sessions[0], cwd, pid, scope)))
+        return
     print(json.dumps({'error': 'OMP session is not available'}))
 
 
