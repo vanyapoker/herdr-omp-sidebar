@@ -80,25 +80,41 @@ def result_text(msg, limit=1500):
     return content if len(content) <= limit else content[:limit] + '\n… (truncated)'
 
 
+def tool_label(data, call=None):
+    """A readable name for a tool call: its stated intent, else the tool and what it works on."""
+    call = call or {}
+    intent = data.get('intent') or call.get('intent')
+    if intent:
+        return intent
+    name = data.get('toolName') or ''
+    detail = detail_of(name, data.get('args') or call.get('arguments') or {})
+    return f'{name} {detail}'.strip() if detail else name
+
+
 def worker_activity(path):
-    """Tool count, current and latest tool of one subagent's transcript."""
-    labels, order, finished = {}, [], set()
+    """Tool count, current and latest tool of one subagent's transcript, and when it last wrote."""
+    labels, order, finished, calls = {}, [], set(), {}
     try:
         with open(path, 'rb') as f:
             for line in f:
                 try:
                     if b'"tool_execution_start"' in line:
                         data = json.loads(line).get('data') or {}
-                        labels[data.get('toolCallId')] = data.get('intent') or data.get('toolName')
+                        labels[data.get('toolCallId')] = tool_label(data, calls.get(data.get('toolCallId')))
                         order.append(data.get('toolCallId'))
                     elif b'"role":"toolResult"' in line:
                         finished.add((json.loads(line).get('message') or {}).get('toolCallId'))
+                    elif b'"toolCall"' in line:
+                        for call in (json.loads(line).get('message') or {}).get('content', []):
+                            if isinstance(call, dict) and call.get('type') == 'toolCall':
+                                calls[call.get('id')] = call
                 except (ValueError, AttributeError):
                     continue
+        updated = int(os.path.getmtime(path) * 1000)
     except OSError:
         return {}
     pending = [i for i in order if i not in finished]
-    return {'tools': len(order), 'current': labels[pending[-1]] if pending else None, 'last': labels[order[-1]] if order else None}
+    return {'tools': len(order), 'current': labels[pending[-1]] if pending else None, 'last': labels[order[-1]] if order else None, 'updated': updated}
 
 
 def omp_exe(pid):
@@ -250,9 +266,10 @@ def build_changes(changes, only_turn, max_lines=1500):
     return {'files': result, 'turn': only_turn is not None}
 
 
-def session_data(path, cwd, pid, scope=None):
+def session_data(path, cwd, pid, scope=None, held=None):
     phases, calls, workers, model, effort = [], {}, {}, None, None
     tokens = None
+    assignments = {}
     turn_no, edits, changes = 0, 0, []
     turn = {'started': None, 'actions': [], 'order': []}
     session_dir = os.path.splitext(path)[0]
@@ -296,6 +313,9 @@ def session_data(path, cwd, pid, scope=None):
                     action['input'] = args_text(name, args)
                     if name == 'task' and isinstance(args, dict):
                         action['names'] = [t.get('name') for t in args.get('tasks', []) if isinstance(t, dict) and t.get('name')]
+                        for t in args.get('tasks', []):
+                            if isinstance(t, dict) and t.get('name') and isinstance(t.get('task'), str):
+                                assignments[t['name']] = clip(t['task'], 160)
                     target = file_target(name, args, cwd)
                     if target:
                         action['path'] = target
@@ -343,6 +363,15 @@ def session_data(path, cwd, pid, scope=None):
                 worker['report'] = report
                 if worker['status'] == 'started':
                     worker['status'] = 'completed'
+    if held is not None:
+        for ident in held:
+            workers.setdefault(ident, {'id': ident, 'agent': ''})['status'] = 'running'
+        for worker in workers.values():
+            if worker['id'] not in held and worker.get('status') in ('started', 'running'):
+                worker['status'] = 'completed'
+    for ident, summary in assignments.items():
+        if ident in workers:
+            workers[ident]['summary'] = summary
     actions = turn['actions'] if isinstance(turn['actions'], dict) else {}
     ordered = [actions[i] for i in turn['order'] if i in actions]
     if scope:
@@ -352,9 +381,12 @@ def session_data(path, cwd, pid, scope=None):
         counts[action['tool']] = counts.get(action['tool'], 0) + 1
     # Subagent progress comes from each worker's own transcript; only running workers
     # and the ones this turn's task calls named are read.
-    wanted = {w['id'] for w in workers.values() if w.get('status') in ('started', 'running')}
+    current_names = set()
     for action in ordered:
-        wanted.update(action.get('names', []))
+        current_names.update(action.get('names', []))
+    for worker in workers.values():
+        worker['recent'] = worker.get('status') in ('started', 'running') or worker['id'] in current_names
+    wanted = {w['id'] for w in workers.values() if w.get('status') in ('started', 'running')} | current_names
     for ident in wanted:
         if ident in workers and re.fullmatch(r'[A-Za-z0-9_-]+', ident):
             transcript = os.path.join(session_dir, ident + '.jsonl')
@@ -413,12 +445,16 @@ def main():
     cwd = process_cwd(pid)
     # omp also holds its running subagents' transcripts open (<project>/<session>/<Name>.jsonl);
     # the session itself is the file directly inside the project folder.
-    sessions = [p for p in open_files(pid) if '/sessions/' in p and p.endswith('.jsonl') and os.path.isfile(p)]
+    files = list(open_files(pid))
+    sessions = [p for p in files if '/sessions/' in p and p.endswith('.jsonl') and os.path.isfile(p)]
     sessions.sort(key=lambda p: (len(p.split('/sessions/', 1)[1].split('/')) != 2, -os.path.getmtime(p)))
     if sessions:
         # `read.py <pid> --changes turn|session` lists the files omp changed instead of the usual summary.
         scope = sys.argv[3] if len(sys.argv) > 3 and sys.argv[2] == '--changes' else None
-        print(json.dumps(session_data(sessions[0], cwd, pid, scope)))
+        # A subagent's transcript is open in the process exactly while that subagent runs.
+        folder = os.path.splitext(sessions[0])[0]
+        held = {os.path.basename(p)[:-6] for p in files if os.path.dirname(p) == folder and p.endswith('.jsonl')}
+        print(json.dumps(session_data(sessions[0], cwd, pid, scope, held)))
         return
     print(json.dumps({'error': 'OMP session is not available'}))
 

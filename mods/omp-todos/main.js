@@ -322,20 +322,36 @@ export default class OmpTodos extends View {
               .when(Boolean(why), c => c.child(div().text_size(11).text_color(t.blocked).child(why))));
         }))));
 
-    const runningWorkers = workers.filter(w => w.status === "started" || w.status === "running").length;
-    const shownWorkers = this.showAllWorkers ? workers : workers.slice(0, 5);
+    const isRunning = w => w.status === "started" || w.status === "running";
+    const runningWorkers = workers.filter(isRunning).length;
+    // Running subagents first, then the ones this turn started; older ones sit behind a toggle.
+    const byRunning = (a, b) => Number(isRunning(b)) - Number(isRunning(a));
+    const currentWorkers = workers.filter(w => w.recent).sort(byRunning);
+    const earlierWorkers = workers.filter(w => !w.recent);
+    const shownWorkers = this.showAllWorkers ? [...currentWorkers, ...earlierWorkers] : currentWorkers;
     const workerTone = w => w.status === "completed" ? t.done : w.status === "failed" || w.status === "blocked" ? t.blocked : t.working;
-    const subagents = v_flex().gap(8)
-      .child(section("Subagents", runningWorkers ? `${runningWorkers} running · ${workers.length}` : `${workers.length}`))
-      .child(v_flex().gap(2).children(shownWorkers.map((worker, i) => v_flex()
-        .child(h_flex().gap(8).items_center().px(8).py(5).rounded(6)
-          .child(div().size(6).flex_none().rounded(3).bg(workerTone(worker)))
+    const workerRow = (worker, i) => {
+      const live = isRunning(worker);
+      const doing = worker.current ? worker.current : worker.last ? `thinking · after ${worker.last}` : "starting…";
+      const ago = worker.updated ? `${duration(now - worker.updated)} ago` : "";
+      return v_flex().gap(1).px(8).py(5).rounded(6).when(live, el => el.bg(t.surface))
+        .child(h_flex().gap(8).items_center()
+          .child(live ? svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900) : div().size(6).flex_none().rounded(3).bg(workerTone(worker)))
           .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(worker.id))
-          .child(div().flex_none().text_size(11).text_color(t.dim).child(worker.status === "started" ? "running" : worker.status))
+          .when(Boolean(worker.agent) && worker.agent !== "task", r => r.child(div().flex_none().text_size(10).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(worker.agent)))
+          .child(div().flex_none().text_size(11).text_color(t.dim).child(live ? "running" : worker.status))
           .when(Boolean(worker.report), row => row.child(div().id(`worker-report-${i}`).flex_none().text_size(11).cursor_pointer().text_color(t.accent)
             .hover(s => s.text_color(t.foreground)).on_click(() => open(worker.report)).child("View"))))
-        .when(Boolean(worker.current), c => c.child(div().pl(22).pr(8).text_size(11).truncate().text_color(t.dim).child(`${worker.tools ? `${worker.tools} tools · ` : ""}${worker.current}`))))))
-      .when(workers.length > 5, c => c.child(toggle("omp-toggle-workers", this.showAllWorkers ? "Show fewer" : `${workers.length - 5} more`, Boolean(this.showAllWorkers),
+        .when(live && Boolean(worker.summary), c => c.child(div().id(`worker-summary-${i}`).pl(19).text_size(11).truncate().text_color(t.dim).tooltip(worker.summary).child(worker.summary)))
+        .when(live, c => c.child(h_flex().gap(8).pl(19).items_center().text_size(11)
+          .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(doing))
+          .child(div().flex_none().text_color(t.dim).child([worker.tools ? `${worker.tools} tools` : "", ago].filter(Boolean).join(" · ")))))
+        .when(!live && Boolean(worker.tools), c => c.child(div().pl(19).text_size(11).text_color(t.dim).child(`${worker.tools} tools`)));
+    };
+    const subagents = v_flex().gap(8)
+      .child(section("Subagents", runningWorkers ? `${runningWorkers} running` : `${currentWorkers.length}`))
+      .child(v_flex().gap(2).children(shownWorkers.map(workerRow)))
+      .when(earlierWorkers.length > 0, c => c.child(toggle("omp-toggle-workers", this.showAllWorkers ? "Hide earlier" : `${earlierWorkers.length} earlier`, Boolean(this.showAllWorkers),
         (_e, cx) => { this.showAllWorkers = !this.showAllWorkers; cx.notify(); })));
 
     const parts = (this.model ?? "").split("/");
