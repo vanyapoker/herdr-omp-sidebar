@@ -325,6 +325,7 @@ def session_data(path, cwd, pid, scope=None, held=None):
     tokens = None
     assignments = {}
     turn_no, edits, changes = 0, 0, []
+    turn_added = turn_removed = 0
     turn = {'started': None, 'actions': [], 'order': []}
     session_dir = os.path.splitext(path)[0]
     with open(path, 'rb') as f:
@@ -341,6 +342,7 @@ def session_data(path, cwd, pid, scope=None, held=None):
                 if msg.get('role') == 'user':
                     turn = {'started': msg.get('timestamp'), 'actions': {}, 'order': []}
                     turn_no += 1
+                    turn_added = turn_removed = 0
                 if msg.get('role') == 'assistant':
                     # A session that never switched models has no model_change record; its replies name the model.
                     if msg.get('provider') and msg.get('model'):
@@ -390,8 +392,11 @@ def session_data(path, cwd, pid, scope=None, held=None):
                         action['diff'] = diff_text(msg.get('details'))
                 if not msg.get('isError') and msg.get('toolName') in ('edit', 'write'):
                     edits += 1
-                    if scope:
-                        changes.extend(changed_files(msg, calls.get(msg.get('toolCallId')), cwd, turn_no))
+                    for change in changed_files(msg, calls.get(msg.get('toolCallId')), cwd, turn_no):
+                        turn_added += sum(1 for l in change['diff'].split('\n') if re.match(r'\+\s*\d+\|', l))
+                        turn_removed += sum(1 for l in change['diff'].split('\n') if re.match(r'-\s*\d+\|', l))
+                        if scope:
+                            changes.append(change)
                 details = msg.get('details') or {}
                 if msg.get('isError'):
                     continue
@@ -455,7 +460,7 @@ def session_data(path, cwd, pid, scope=None, held=None):
         action.pop('diff', None)
     return {
         'phases': phases,
-        'turn': {'started': turn['started'], 'tools': len(ordered), 'counts': counts},
+        'turn': {'started': turn['started'], 'tools': len(ordered), 'counts': counts, 'added': turn_added, 'removed': turn_removed},
         'actions': ordered[-MAX_ACTIONS:][::-1],
         'workers': list(workers.values())[::-1],
         'model': model,
