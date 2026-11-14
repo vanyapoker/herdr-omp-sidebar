@@ -4,6 +4,7 @@ import { agents, focused, hc, exec, appHome, theme, run, openOverlay, readTextFi
 
 // A remote terminal's address is "machine/t7"; local ones have no prefix.
 const machineOf = address => (address?.includes("/") ? address.split("/")[0] : null);
+const modelShort = model => model.split("/").slice(1).join("/") || model;
 let readerSource = null;
 
 function selected() {
@@ -248,6 +249,7 @@ export default class OmpTodos extends View {
     const workerLines = (list, indent) => v_flex().gap(1).pl(indent).children(list.map(w => h_flex().gap(6).items_center().px(4)
       .child(div().size(5).flex_none().rounded(3).bg(dotTone(w)))
       .child(div().flex_none().max_w(110).truncate().text_size(11).text_color(t.muted).child(w.id))
+      .when(Boolean(w.model), r => r.child(div().flex_none().max_w(80).truncate().text_size(10).text_color(t.dim).child(modelShort(w.model))))
       .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim)
         .child(w.current ? w.current : w.tools ? `${w.tools} tools${w.last ? ` · ${w.last}` : ""}` : ""))));
     const brief = text => { const s = String(text).replace(/\s+/g, " ").trim(); return s.length > 300 ? `${s.slice(0, 299)}…` : s; };
@@ -354,6 +356,7 @@ export default class OmpTodos extends View {
         .child(h_flex().gap(8).items_center()
           .child(live ? svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900) : div().size(6).flex_none().rounded(3).bg(workerTone(worker)))
           .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(worker.id))
+          .when(Boolean(worker.model), r => r.child(div().id(`worker-model-${i}`).flex_none().max_w(110).truncate().text_size(10).px(5).rounded(4).bg(t.raised).text_color(t.muted).tooltip(worker.model).child(modelShort(worker.model))))
           .when(Boolean(worker.agent) && worker.agent !== "task", r => r.child(div().flex_none().text_size(10).px(5).rounded(4).bg(t.raised).text_color(t.muted).child(worker.agent)))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(live ? "running" : worker.status))
           .when(Boolean(worker.report), row => row.child(div().id(`worker-report-${i}`).flex_none().text_size(11).cursor_pointer().text_color(t.accent)

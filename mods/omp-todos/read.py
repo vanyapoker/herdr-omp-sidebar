@@ -94,7 +94,7 @@ def tool_label(data, call=None):
 
 def worker_activity(path):
     """Tool count, current and latest tool of one subagent's transcript, and when it last wrote."""
-    labels, order, finished, calls = {}, [], set(), {}
+    labels, order, finished, calls, model = {}, [], set(), {}, None
     try:
         with open(path, 'rb') as f:
             for line in f:
@@ -103,10 +103,15 @@ def worker_activity(path):
                         data = json.loads(line).get('data') or {}
                         labels[data.get('toolCallId')] = tool_label(data, calls.get(data.get('toolCallId')))
                         order.append(data.get('toolCallId'))
+                    elif b'"model_change"' in line:
+                        model = json.loads(line).get('model') or model
                     elif b'"role":"toolResult"' in line:
                         finished.add((json.loads(line).get('message') or {}).get('toolCallId'))
                     elif b'"toolCall"' in line:
-                        for call in (json.loads(line).get('message') or {}).get('content', []):
+                        message = json.loads(line).get('message') or {}
+                        if not model and message.get('provider') and message.get('model'):
+                            model = f"{message['provider']}/{message['model']}"
+                        for call in message.get('content', []):
                             if isinstance(call, dict) and call.get('type') == 'toolCall':
                                 calls[call.get('id')] = call
                 except (ValueError, AttributeError):
@@ -115,7 +120,7 @@ def worker_activity(path):
     except OSError:
         return {}
     pending = [i for i in order if i not in finished]
-    return {'tools': len(order), 'current': labels[pending[-1]] if pending else None, 'last': labels[order[-1]] if order else None, 'updated': updated}
+    return {'tools': len(order), 'current': labels[pending[-1]] if pending else None, 'last': labels[order[-1]] if order else None, 'updated': updated, 'model': model}
 
 
 def omp_exe(pid):
