@@ -11,14 +11,10 @@ function find(node, id) {
   return null;
 }
 
-const OMP_HIDE_DELAY = 1200; // ms OMP must stay gone before the panel is hidden
-
 export default class Tabs extends View {
-  init(_props, cx) {
+  init() {
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
-    // A pending hide needs a redraw once its delay is over, even if nothing else changes.
-    cx.timer.every(400, cx => { if (this.ompLeftAt) cx.notify(); });
   }
 
   // The side panel is remembered per space: switching shows that space's choice
@@ -47,50 +43,6 @@ export default class Tabs extends View {
     if (this.panels[space.id] === now) return;
     this.panels[space.id] = now;
     localStorage.setItem("panels", JSON.stringify(this.panels));
-  }
-
-  // The panel belongs only to the focused OMP terminal. Remember its last
-  // deliberate visibility while temporarily hiding it in other terminals.
-  // Hiding waits for OMP to stay gone: every show/hide resizes the terminal beside it, and a
-  // resize that lands mid-redraw can leave a full-screen program such as OMP drawn at the wrong width.
-  syncOmpPanel(seen, panel) {
-    if (!panel) return seen;
-    const visible = !panel.hidden;
-    let active = seen;
-    if (this.ompActive && !seen) {
-      this.ompLeftAt ??= Date.now();
-      if (Date.now() - this.ompLeftAt < OMP_HIDE_DELAY) active = true;
-    } else {
-      this.ompLeftAt = null;
-    }
-    if (this.ompActive === undefined) {
-      this.ompWanted = localStorage.getItem("omp-todos-open") !== "false";
-      this.ompActive = active;
-      if (!active && visible) run("layout.hide", { id: "omp-todos" });
-      else if (active && visible !== this.ompWanted) {
-        this.ompPending = { want: this.ompWanted, until: Date.now() + 1000 };
-        run(this.ompWanted ? "layout.show" : "layout.hide", { id: "omp-todos" });
-      }
-      return active;
-    }
-    if (active !== this.ompActive) {
-      this.ompActive = active;
-      const want = active && this.ompWanted;
-      this.ompPending = { want, until: Date.now() + 1000 };
-      if (visible !== want) run(want ? "layout.show" : "layout.hide", { id: "omp-todos" });
-      return active;
-    }
-    if (this.ompPending) {
-      if (visible !== this.ompPending.want && Date.now() < this.ompPending.until) return active;
-      this.ompPending = null;
-    }
-    if (!active) {
-      if (visible) run("layout.hide", { id: "omp-todos" });
-    } else if (this.ompWanted !== visible) {
-      this.ompWanted = visible;
-      localStorage.setItem("omp-todos-open", String(visible));
-    }
-    return active;
   }
 
   render() {
@@ -130,12 +82,7 @@ export default class Tabs extends View {
     const panel = find(root, "panel"), body = find(root, "panel-body");
     const enabled = shared("workspace.panels") ?? ["files", "changes"];
     this.syncPanel(space, panel, body, enabled);
-    const focus = focused(), address = focus?.shown ?? focus?.terminal ?? focus?.agent;
-    // No focused terminal (an overlay, a mod pane, or the window in the background) says nothing about
-    // OMP: keep the panel as it is instead of resizing the terminal for a state we cannot see.
-    const ompSeen = address ? agents().some(a => a.address === address && a.app === "omp") : (this.ompActive ?? false);
     const ompPanel = find(root, "omp-todos");
-    const ompShown = this.syncOmpPanel(ompSeen, ompPanel);
     const panelButton = (id, label, icon) => {
       const on = panel && !panel.hidden && body?.active === id;
       return h_flex().id(`panel-${id}`).h(26).px(8).gap(5).flex_none().items_center().rounded(6)
@@ -151,7 +98,7 @@ export default class Tabs extends View {
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
-      .when(ompShown && Boolean(ompPanel), el => el.child(h_flex().id("panel-omp-todos").h(26).px(8).gap(5).flex_none().items_center().rounded(6)
+      .when(Boolean(ompPanel), el => el.child(h_flex().id("panel-omp-todos").h(26).px(8).gap(5).flex_none().items_center().rounded(6)
         .text_size(12).bg(ompPanel.hidden ? t.chrome : t.selected).text_color(ompPanel.hidden ? t.muted : t.foreground)
         .hover(s => s.bg(t.hover)).on_mouse_down("left", stop)
         .on_click(() => run("layout.toggle", { id: "omp-todos" }))

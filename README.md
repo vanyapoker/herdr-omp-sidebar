@@ -12,7 +12,7 @@ A panel next to the focused **omp** terminal in the Herdr app.
 | **Model** | searchable picker for omp's catalog, with pinned favourites (Ctrl+F) |
 | **Effort** | one-click thinking level (off to max) |
 
-A toolbar **OMP** button and `Ctrl+Shift+U` toggle the panel. It appears only when the focused terminal runs omp.
+A toolbar **OMP** button and `Ctrl+Shift+U` toggle the panel, like Files and Changes. It opens or closes only when you ask: showing or hiding it resizes every terminal in the window, and a resize while omp is redrawing can leave its screen corrupted. With a non-omp terminal focused, the panel shows a hint.
 
 ## Install
 
