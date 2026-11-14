@@ -1,3 +1,4 @@
+import shutil
 import time
 import subprocess
 import json
@@ -118,12 +119,41 @@ def worker_activity(path):
 
 
 def omp_exe(pid):
+    """The omp binary to run `models` / `usage` with. After omp updates itself the running process's own path
+    is a "(deleted)" backup that no longer exists, so fall back to the current binary on PATH."""
+    candidates = []
     if os.path.isdir('/proc'):
-        return os.path.realpath(f'/proc/{pid}/exe')
-    return subprocess.run(['ps', '-o', 'comm=', '-p', str(pid)], capture_output=True, text=True, timeout=5).stdout.strip()
+        try:
+            candidates.append(os.readlink(f'/proc/{pid}/exe').removesuffix(' (deleted)'))
+        except OSError:
+            pass
+        try:
+            with open(f'/proc/{pid}/cmdline', 'rb') as f:
+                candidates.append(f.read().split(b'\0')[0].decode())
+        except OSError:
+            pass
+    else:
+        candidates.append(subprocess.run(['ps', '-o', 'comm=', '-p', str(pid)], capture_output=True, text=True, timeout=5).stdout.strip())
+    candidates += [shutil.which('omp'), os.path.expanduser('~/.local/share/mise/shims/omp'), os.path.expanduser('~/.local/bin/omp')]
+    for path in candidates:
+        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    raise OSError('omp binary not found')
 
 
-def usage_limits(pid, provider, ttl=60):
+def for_model(limits, model):
+    """Per-tier limits (e.g. "7 Day (Fable)") only count for models of that tier; they get the tier in their label."""
+    name = (model or '').lower()
+    result = []
+    for limit in limits:
+        tier = limit.get('tier')
+        if tier and tier.lower() not in name:
+            continue
+        result.append({**limit, 'label': f"{limit['label']} ({tier.capitalize()})" if tier else limit['label']})
+    return result
+
+
+def usage_limits(pid, provider, ttl=60, model=''):
     """Rate-limit windows (5 hours, 7 days, ...) of the provider's account, from `omp usage`; cached for a minute."""
     cache = os.path.expanduser('~/.cache/omp-todos-usage.json')
     try:
@@ -133,7 +163,7 @@ def usage_limits(pid, provider, ttl=60):
         saved = {}
     entry = saved.get(provider)
     if entry and time.time() - entry['at'] < ttl:
-        return entry['limits']
+        return for_model(entry['limits'], model)
     try:
         out = subprocess.run([omp_exe(pid), 'usage', '--json', '--provider', provider], capture_output=True, text=True, timeout=20).stdout
         limits = []
@@ -153,38 +183,62 @@ def usage_limits(pid, provider, ttl=60):
                     'limit': amount.get('limit'),
                     'resetsAt': window.get('resetsAt'),
                     'status': limit.get('status'),
+                    'tier': (limit.get('scope') or {}).get('tier'),
                 })
             break
         saved[provider] = {'at': time.time(), 'limits': limits}
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         with open(cache, 'w') as f:
             json.dump(saved, f)
-        return limits
+        return for_model(limits, model)
     except (OSError, ValueError, subprocess.SubprocessError):
-        return entry['limits'] if entry else []
+        return for_model(entry['limits'], model) if entry else []
+
+
+CATALOG_FILE = '~/.cache/omp-catalog.json'
+CATALOG_MAX_AGE = 86400  # a day: new models rarely appear faster
+CATALOG_RETRY = 600  # a model missing from a younger catalog is not worth another 1-3 s `omp models` run
+
+
+def read_catalog():
+    try:
+        with open(os.path.expanduser(CATALOG_FILE)) as f:
+            saved = json.load(f)
+        return saved if isinstance(saved.get('models'), list) else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def catalog(pid, force=False, need=None):
+    """OMP's chat models (`omp models --json`), cached on disk. Refreshed when a day old, when `force`d,
+    or when `need` (a selector) is missing and the copy is more than ten minutes old."""
+    saved = read_catalog()
+    age = time.time() - saved['at'] if saved else None
+    stale = (saved is None or force or age > CATALOG_MAX_AGE
+             or (need is not None and age > CATALOG_RETRY and not any(m.get('selector') == need for m in saved['models'])))
+    if not stale:
+        return saved['models']
+    try:
+        out = subprocess.run([omp_exe(pid), 'models', '--json'], capture_output=True, text=True, timeout=30).stdout
+        models = json.loads(out)
+        models = models.get('models', []) if isinstance(models, dict) else models
+        models = [m for m in models if m.get('kind') == 'chat']
+        path = os.path.expanduser(CATALOG_FILE)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + '.tmp', 'w') as f:
+            json.dump({'at': time.time(), 'models': models}, f)
+        os.replace(path + '.tmp', path)
+        return models
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return saved['models'] if saved else []
 
 
 def context_window(pid, model):
-    """Context window of a model, from OMP's catalog (cached after the first lookup)."""
-    cache = os.path.expanduser('~/.cache/omp-todos-windows.json')
-    try:
-        with open(cache) as f:
-            windows = json.load(f)
-    except (OSError, ValueError):
-        windows = {}
-    if model not in windows:
-        try:
-            exe = omp_exe(pid)
-            out = subprocess.run([exe, 'models', '--json'], capture_output=True, text=True, timeout=20).stdout
-            catalog = json.loads(out)
-            catalog = catalog.get('models', []) if isinstance(catalog, dict) else catalog
-            windows = {m['selector']: m.get('contextWindow') for m in catalog}
-            os.makedirs(os.path.dirname(cache), exist_ok=True)
-            with open(cache, 'w') as f:
-                json.dump(windows, f)
-        except (OSError, ValueError, subprocess.SubprocessError, KeyError):
-            return None
-    return windows.get(model)
+    """Context window of a model, from the cached catalog."""
+    for m in catalog(pid, need=model):
+        if m.get('selector') == model:
+            return m.get('contextWindow')
+    return None
 
 
 def git_branch(cwd):
@@ -408,7 +462,7 @@ def session_data(path, cwd, pid, scope=None, held=None):
         'effort': effort,
         'tokens': tokens,
         'window': context_window(pid, (model or '').split(':')[0]) if model else None,
-        'limits': usage_limits(pid, model.split('/')[0]) if model and '/' in model else [],
+        'limits': usage_limits(pid, model.split('/')[0], model=model) if model and '/' in model else [],
         'branch': git_branch(cwd),
         'title': session_title(path),
         'cwd': cwd,
@@ -442,6 +496,10 @@ def open_files(pid):
 
 def main():
     pid = int(sys.argv[1])
+    # `read.py <pid> --catalog [--refresh]` prints the model list only (it needs no session).
+    if len(sys.argv) > 2 and sys.argv[2] == '--catalog':
+        print(json.dumps({'models': catalog(pid, force='--refresh' in sys.argv)}))
+        return
     cwd = process_cwd(pid)
     # omp also holds its running subagents' transcripts open (<project>/<session>/<Name>.jsonl);
     # the session itself is the file directly inside the project folder.

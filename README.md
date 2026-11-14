@@ -9,7 +9,7 @@ A panel next to the focused **omp** terminal in the Herdr app.
 | **Tasks** | omp's todo list with progress, completed ones collapsible |
 | **Subagents** | running and finished workers, with a viewer for their reports |
 | **Status** | the provider's 5-hour and 7-day limits (left, reset time, from `omp usage`), context use (amber at 60%, red at 80%, with a **Compact** button), git branch, folder |
-| **Model** | searchable picker for omp's catalog, with pinned favourites (Ctrl+F) |
+| **Model** | searchable picker for omp's catalog (cached, so it opens at once), with pinned favourites (Ctrl+F); a switch takes about 0.2 s |
 | **Effort** | one-click thinking level (off to max) |
 
 A toolbar **OMP** button and `Ctrl+Shift+U` toggle the panel, like Files and Changes. It opens or closes only when you ask: showing or hiding it resizes every terminal in the window, and a resize while omp is redrawing can leave its screen corrupted. With a non-omp terminal focused, the panel shows a hint.

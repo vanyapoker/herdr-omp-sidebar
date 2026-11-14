@@ -3,7 +3,7 @@
 // model switcher (Alt+P), so the session's roles and settings stay untouched.
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input } from "gpui-base";
-import { hc, exec, theme, props, closeOverlay, shared, setShared } from "herdr";
+import { hc, exec, theme, props, closeOverlay, shared, setShared, readTextFile, appHome } from "herdr";
 
 const CACHE = "omp.models";
 const FAVORITES = "omp.favoriteModels";
@@ -11,6 +11,27 @@ const ROW = 50;
 
 const context = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1e3)}k`);
 const price = (c) => (!c || (!c.input && !c.output) ? "free" : `$${c.input}/${c.output}`);
+// Every keystroke typed into OMP's filter costs about 30 ms, so type as little as will do: the shortest
+// fragment (starting at a word boundary) that no other model's name contains. A model whose id is the start
+// of another's (haiku-4-5 / haiku-4-5-20251001) gets the fragment that leaves the fewest others matching.
+function searchText(model, models) {
+  const id = model.id.toLowerCase();
+  const others = models.filter((m) => m.selector !== model.selector).map((m) => `${m.selector} ${m.name}`.toLowerCase());
+  let best = null;
+  for (let len = 3; len <= id.length; len++) {
+    for (let start = 0; start + len <= id.length; start++) {
+      if (start > 0 && !/[-.\/:_ ]/.test(id[start - 1])) continue;
+      const q = id.slice(start, start + len);
+      if (!/^[a-z0-9][a-z0-9._-]*$/.test(q)) continue; // no "/", ":" or spaces: OMP's filter may treat them specially
+      const hits = others.reduce((n, h) => n + (h.includes(q) ? 1 : 0), 0);
+      if (hits === 0) return q;
+      if (!best || hits < best.hits) best = { q, hits };
+    }
+  }
+  return best?.q ?? model.id.split(/[\/:]/).sort((a, b) => b.length - a.length)[0];
+}
+
+const POLL = 0.02; // seconds between screen reads: each read costs about 5 ms
 const sleep = (s) => exec("sleep", [String(s)]);
 
 async function screenOf(address) {
@@ -20,18 +41,18 @@ async function screenOf(address) {
 // The row OMP's picker has highlighted: "❯ provider/model …".
 const highlighted = (screen) => /^[^\w❯]*❯\s+(\S+)/m.exec(screen)?.[1] ?? null;
 
-async function untilScreen(address, ok, tries = 25) {
+async function untilScreen(address, ok, tries = 100) {
   for (let i = 0; i < tries; i++) {
     const screen = await screenOf(address);
     if (ok(screen)) return screen;
-    await sleep(0.08);
+    await sleep(POLL);
   }
   return null;
 }
 
 // Drives OMP's own picker: open it, filter to the model, confirm the highlighted row is
 // the wanted one (walking down if several match), then press Enter.
-async function applyModel(address, model) {
+async function applyModel(address, model, models = []) {
   const info = await hc(["get", address, "--json"]);
   if (info.code !== 0) throw new Error("Cannot inspect the terminal");
   const terminal = JSON.parse(info.stdout);
@@ -41,20 +62,20 @@ async function applyModel(address, model) {
   await hc(["keys", address, "alt+p"]);
   if (!(await untilScreen(address, (s) => s.includes("Switch Model")))) throw new Error("OMP's model picker did not open.");
 
-  // The longest plain segment of the id narrows the list without punctuation OMP's filter may treat specially.
-  const query = model.id.split(/[\/:]/).sort((a, b) => b.length - a.length)[0];
-  await hc(["keys", address, ...query.split("")]);
-  let seen = await untilScreen(address, (s) => highlighted(s) !== null);
+  await hc(["keys", address, ...searchText(model, models).split("")]);
+  // The wanted model is normally the first row once the filter has applied; wait for it, then fall back to walking down.
+  let seen = (await untilScreen(address, (s) => highlighted(s) === model.selector, 25)) ?? (await screenOf(address));
   try {
     for (let i = 0; i < 40; i++) {
-      const current = highlighted(seen ?? "");
+      const current = highlighted(seen);
       if (current === model.selector) {
         await hc(["keys", address, "enter"]);
-        if (!(await untilScreen(address, (s) => !s.includes("Switch Model"), 30))) throw new Error("OMP did not confirm the switch.");
+        if (!(await untilScreen(address, (s) => !s.includes("Switch Model"), 150))) throw new Error("OMP did not confirm the switch.");
         return;
       }
+      if (current === null) break;
       await hc(["keys", address, "down"]);
-      seen = await untilScreen(address, (s) => highlighted(s) !== current, 15);
+      seen = await untilScreen(address, (s) => highlighted(s) !== current, 60);
       if (!seen) break;
     }
     throw new Error(`${model.selector} is not selectable in this session.`);
@@ -64,14 +85,18 @@ async function applyModel(address, model) {
   }
 }
 
+// The model list comes from omp-todos/read.py, which keeps it in ~/.cache/omp-catalog.json on the
+// machine omp runs on: a warm read takes about 30 ms, a cold `omp models --json` one to three seconds.
+let readerSource = null;
 async function loadCatalog(address) {
   const info = await hc(["get", address, "--json"]);
   const pid = JSON.parse(info.stdout).foreground?.pid;
+  if (!pid) throw new Error("OMP is not running in that terminal");
+  readerSource ??= await readTextFile(`${appHome()}/mods/omp-todos/read.py`);
   const on = address.includes("/") ? address.split("/")[0] : null;
-  const exe = (await exec("sh", ["-c", 'readlink -f "/proc/$0/exe" 2>/dev/null || ps -o comm= -p "$0"', String(pid)], { on })).stdout.trim();
-  const result = await exec(exe, ["models", "--json"], { on });
+  const result = await exec("python3", ["-c", readerSource, String(pid), "--catalog"], { on });
   if (result.code !== 0) throw new Error(result.stderr || "Cannot list models");
-  return (JSON.parse(result.stdout).models ?? []).filter((m) => m.kind === "chat");
+  return JSON.parse(result.stdout).models ?? [];
 }
 
 export default class OmpModels extends View {
@@ -79,7 +104,8 @@ export default class OmpModels extends View {
     this.address = props()?.address;
     this.current = props()?.model;
     this.cacheKey = `${CACHE}:${this.address?.split("/")[0] ?? ""}`;
-    this.models = shared(this.cacheKey) ?? [];
+    // The last list opens instantly (this run's, else the one saved by an earlier run); a fresh one replaces it below.
+    this.models = shared(this.cacheKey) ?? (() => { try { return JSON.parse(localStorage.getItem(this.cacheKey) ?? "[]"); } catch { return []; } })();
     this.cursor = 0;
     this.offset = 0;
     this.areaHeight = 400;
@@ -94,6 +120,7 @@ export default class OmpModels extends View {
       try {
         this.models = await loadCatalog(this.address);
         setShared(this.cacheKey, this.models);
+        localStorage.setItem(this.cacheKey, JSON.stringify(this.models));
         this.error = null;
       } catch (e) { if (!this.models.length) this.error = String(e); }
       cx.notify();
@@ -132,7 +159,7 @@ export default class OmpModels extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       try {
-        await applyModel(this.address, model);
+        await applyModel(this.address, model, this.models);
         closeOverlay(props().overlay);
       } catch (e) {
         this.error = String(e).replace(/^Error: /, "");
